@@ -129,6 +129,60 @@ ensure_claude() {
   return 0
 }
 
+# --- token: validate + save ---
+
+# validate_token TOKEN — returns 0 on HTTP 200, 1 on 401, 2 on network error.
+validate_token() {
+  tok="$1"
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $tok" \
+    "$CLAUDEV_AUTH_HOST/v1/auth/me" 2>/dev/null) || code="000"
+  case "$code" in
+    200) return 0 ;;
+    401|403) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+ensure_token() {
+  # If a stored token is present, return it immediately. Caller (fetch_key) will
+  # bounce back to ensure_token with $TOKEN_FORCE_REPROMPT=1 on 401.
+  if [ "${TOKEN_FORCE_REPROMPT:-0}" != 1 ] && [ -f "$CLAUDEV_TOKEN" ]; then
+    TOKEN=$(cat "$CLAUDEV_TOKEN")
+    [ -n "$TOKEN" ] && return 0
+  fi
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    printf "%s" "$L_PASTE_CODE" >&2
+    # stty -echo: hide pasted code from tty echo.
+    if [ -t 0 ]; then stty -echo 2>/dev/null || true; fi
+    read -r tok
+    if [ -t 0 ]; then stty echo 2>/dev/null || true; echo >&2; fi
+    if [ -z "$tok" ]; then
+      attempt=$((attempt+1)); continue
+    fi
+    if validate_token "$tok"; then
+      mkdir -p "$CLAUDEV_HOME"
+      umask 077
+      printf "%s" "$tok" > "$CLAUDEV_TOKEN"
+      chmod 600 "$CLAUDEV_TOKEN"
+      TOKEN="$tok"
+      return 0
+    fi
+    rc=$?
+    if [ "$rc" = 2 ]; then
+      # shellcheck disable=SC2059
+      printf "${L_NETWORK_ERROR}\n" "$CLAUDEV_AUTH_HOST" >&2
+      exit 2
+    fi
+    # shellcheck disable=SC2059
+    printf "${L_INVALID_CODE}\n" "$attempt" >&2
+    attempt=$((attempt+1))
+  done
+  printf "%s\n" "$L_TOO_MANY_ATTEMPTS" >&2
+  return 1
+}
+
 # --- selftest hooks (used by bats; not user-facing) ---
 
 case "${1:-}" in
@@ -153,6 +207,15 @@ case "${1:-}" in
   --selftest-ensure-claude)
     load_locale
     ensure_claude
+    exit $?
+    ;;
+  --selftest-validate)
+    validate_token "$2"
+    exit $?
+    ;;
+  --selftest-ensure-token)
+    load_locale
+    ensure_token
     exit $?
     ;;
 esac
