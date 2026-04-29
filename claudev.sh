@@ -100,6 +100,35 @@ print_header() {
   printf "${L_HEADER_FMT}\n" "$CLAUDEV_VERSION" "$lang"
 }
 
+# --- claude code detect + install ---
+
+have_claude() {
+  command -v claude >/dev/null 2>&1
+}
+
+install_claude() {
+  curl -fsSL https://claude.ai/install.sh | bash
+}
+
+ensure_claude() {
+  have_claude && return 0
+  printf "%s\n" "$L_CLAUDE_NOT_FOUND" >&2
+  if [ ! -t 0 ]; then
+    return 1
+  fi
+  printf "%s" "$L_CLAUDE_INSTALL_PROMPT"
+  read -r ans
+  case "$ans" in
+    n|N|no|No|NO) return 1 ;;
+  esac
+  install_claude || true
+  if ! have_claude; then
+    printf "%s\n" "$L_CLAUDE_INSTALL_FAILED" >&2
+    return 1
+  fi
+  return 0
+}
+
 # --- selftest hooks (used by bats; not user-facing) ---
 
 case "${1:-}" in
@@ -120,6 +149,11 @@ case "${1:-}" in
     load_locale
     print_header
     exit 0
+    ;;
+  --selftest-ensure-claude)
+    load_locale
+    ensure_claude
+    exit $?
     ;;
 esac
 
