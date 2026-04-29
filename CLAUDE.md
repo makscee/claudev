@@ -1,0 +1,24 @@
+# claudev — agent notes
+
+Thin POSIX-sh wrapper. Single `claudev.sh` source. Mac/linux only in v1.
+
+## Conventions
+
+- Plain POSIX sh (`#!/bin/sh`); no bash extensions. Run `shellcheck -s sh claudev.sh` before commit.
+- Fail loud, fail early. `set -eu` at top; never silently swallow errors.
+- All user-facing strings sourced from `locales/<lang>.sh` — never hardcoded in `claudev.sh`.
+- HTTP via `curl -fsS`; assume `curl` present (mac + debian-12 ship it; install.sh checks).
+- JSON parsing without `jq`: small `awk` extractor in `claudev.sh` (jq used only by installer).
+- State: `~/.claudev/{token,config}` only. Never write elsewhere under `$HOME`.
+
+## Don't
+
+- Don't add bash/zsh-isms (arrays, `[[ ]]`, `local`).
+- Don't `eval` user input.
+- Don't log raw tokens. The full token can appear in `~/.claudev/token` (file ACL is the boundary), nowhere else.
+- Don't add new top-level flags. Subcommands or env vars only — `--*` flags pass through to `claude`.
+- Don't ship a Windows port in v1. WSL fallback documented in README.
+
+## Spec + plan
+
+`hub/docs/superpowers/specs/2026-04-30-claudev-v1-design.md` + the matching plan.
