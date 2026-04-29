@@ -284,9 +284,24 @@ case "${1:-}" in
     ;;
 esac
 
-# --- main (placeholder until subsequent tasks fill it in) ---
+# --- main pipeline ---
 
-load_locale
-print_header
-echo "claudev: not implemented yet (T3 skeleton)" >&2
-exit 0
+main() {
+  load_locale
+  print_header
+  ensure_claude
+  ensure_token
+  if ! fetch_key; then
+    rc=$?
+    if [ "$rc" = 10 ]; then
+      TOKEN_FORCE_REPROMPT=1
+      ensure_token
+      fetch_key
+    else
+      exit "$rc"
+    fi
+  fi
+  exec env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@"
+}
+
+main "$@"
