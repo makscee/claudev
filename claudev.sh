@@ -281,15 +281,53 @@ dispatch() {
     update)
       load_locale
       print_header
-      CLAUDEV_FORCE_UPDATE=1 self_update || true   # self_update lands in T9
+      CLAUDEV_FORCE_UPDATE=1 self_update || true
       exit 0
       ;;
   esac
   return 0  # no subcommand matched → fall through to main
 }
 
-# self_update: filled in T9. Stub here so `claudev update` is callable now.
-self_update() { return 0; }
+# shellcheck disable=SC2120 # $@ used only on the exec path; callers pass none
+self_update() {
+  # Honor CLAUDEV_FORCE_UPDATE=1 OR cache-miss (24h since last check OR never).
+  now=$(date +%s)
+  last=$(config_get last_update_check)
+  : "${last:=0}"
+  cache_age=$(( now - last ))
+  if [ "${CLAUDEV_FORCE_UPDATE:-0}" != 1 ] && [ "$cache_age" -lt 86400 ]; then
+    return 0
+  fi
+  manifest=$(curl -fsS "$CLAUDEV_AUTH_HOST/claudev/version.json" 2>/dev/null) || return 0
+  remote_version=$(printf "%s" "$manifest" | extract_json_string version)
+  remote_sha=$(printf "%s" "$manifest" | extract_json_string sha256_sh)
+  config_set last_update_check "$now"
+  if [ -z "$remote_version" ]; then return 0; fi
+  if [ "$remote_version" = "$CLAUDEV_VERSION" ]; then
+    [ "${CLAUDEV_FORCE_UPDATE:-0}" = 1 ] && echo "claudev: up to date ($CLAUDEV_VERSION)"
+    return 0
+  fi
+  # shellcheck disable=SC2059
+  printf "${L_UPDATE_AVAILABLE}, " "$CLAUDEV_VERSION" "$remote_version"
+  printf "%s" "$L_UPDATE_INSTALL_PROMPT"
+  if [ ! -t 0 ]; then echo "(non-interactive — skipping)"; return 0; fi
+  read -r ans
+  case "$ans" in
+    n|N|no|No|NO) return 0 ;;
+  esac
+  tmp=$(mktemp)
+  curl -fsS "$CLAUDEV_AUTH_HOST/claudev/claudev.sh" -o "$tmp" || { rm -f "$tmp"; return 1; }
+  actual_sha=$(shasum -a 256 "$tmp" 2>/dev/null | awk '{print $1}')
+  [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$tmp" | awk '{print $1}')
+  if [ "$actual_sha" != "$remote_sha" ]; then
+    echo "claudev: sha256 mismatch — refusing update (got $actual_sha, want $remote_sha)" >&2
+    rm -f "$tmp"
+    return 1
+  fi
+  chmod +x "$tmp"
+  mv -f "$tmp" "$0"
+  exec "$0" "$@"
+}
 
 # --- selftest hooks (used by bats; not user-facing) ---
 
@@ -326,6 +364,11 @@ case "${1:-}" in
     ensure_token
     exit $?
     ;;
+  --selftest-self-update)
+    load_locale
+    self_update
+    exit $?
+    ;;
   --selftest-fetch-key)
     load_locale
     TOKEN=$(cat "$CLAUDEV_TOKEN" 2>/dev/null || true)
@@ -343,6 +386,7 @@ esac
 main() {
   load_locale
   print_header
+  self_update      # may exec self and never return
   ensure_claude
   ensure_token
   if ! fetch_key; then
