@@ -237,6 +237,60 @@ fetch_key() {
   esac
 }
 
+# --- subcommand dispatcher ---
+
+print_help() {
+  cat <<EOF
+Usage: claudev [SUBCOMMAND | CLAUDE_ARGS...]
+
+Without arguments, fetches a pool token and exec's \`claude\`.
+
+Subcommands:
+  login     wipe stored token and prompt for a new access code
+  logout    remove the stored token
+  update    force the self-update check (skip 24h cache)
+  --help    show this help
+
+Anything else is forwarded to \`claude\` verbatim.
+
+Env overrides:
+  CLAUDEV_AUTH_HOST  default $CLAUDEV_AUTH_HOST
+  CLAUDEV_KEYS_HOST  default $CLAUDEV_KEYS_HOST
+
+State files: ~/.claudev/{token,config}
+EOF
+}
+
+dispatch() {
+  case "${1:-}" in
+    --help|-h|help)
+      print_help
+      exit 0
+      ;;
+    logout)
+      rm -f "$CLAUDEV_TOKEN"
+      exit 0
+      ;;
+    login)
+      rm -f "$CLAUDEV_TOKEN"
+      load_locale
+      print_header
+      ensure_token
+      exit 0
+      ;;
+    update)
+      load_locale
+      print_header
+      CLAUDEV_FORCE_UPDATE=1 self_update || true   # self_update lands in T9
+      exit 0
+      ;;
+  esac
+  return 0  # no subcommand matched → fall through to main
+}
+
+# self_update: filled in T9. Stub here so `claudev update` is callable now.
+self_update() { return 0; }
+
 # --- selftest hooks (used by bats; not user-facing) ---
 
 case "${1:-}" in
@@ -304,4 +358,5 @@ main() {
   exec env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@"
 }
 
+dispatch "$@"
 main "$@"
