@@ -183,6 +183,60 @@ ensure_token() {
   return 1
 }
 
+# --- pool key fetch ---
+
+# extract_json_string KEY — reads json on stdin, prints first string-typed
+# value for KEY. Tolerant of whitespace; not a full json parser.
+extract_json_string() {
+  awk -v key="$1" '
+    BEGIN { RS=","; FS=":" }
+    {
+      gsub(/[{}\n\r\t ]/, "")
+      if (index($0, "\"" key "\"") == 1) {
+        sub(/^[^:]*:/, "")
+        gsub(/^"|"$/, "")
+        print
+        exit
+      }
+    }
+  '
+}
+
+fetch_key() {
+  resp_file=$(mktemp)
+  code=$(curl -s -o "$resp_file" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    "$CLAUDEV_KEYS_HOST/v1/keys/me" 2>/dev/null) || code="000"
+  case "$code" in
+    200) ;;
+    401)
+      rm -f "$CLAUDEV_TOKEN" "$resp_file"
+      printf "%s\n" "$L_SESSION_REVOKED" >&2
+      return 10  # signal to caller: re-prompt token + retry
+      ;;
+    503)
+      rm -f "$resp_file"
+      printf "%s\n" "$L_POOL_EMPTY" >&2
+      exit 1
+      ;;
+    *)
+      rm -f "$resp_file"
+      # shellcheck disable=SC2059
+      printf "${L_NETWORK_ERROR}\n" "$CLAUDEV_KEYS_HOST" >&2
+      exit 2
+      ;;
+  esac
+  KEY=$(extract_json_string token < "$resp_file")
+  rm -f "$resp_file"
+  case "$KEY" in
+    sk-ant-oat-*) return 0 ;;
+    *)
+      printf "%s\n" "$L_POOL_BAD_KEY" >&2
+      exit 3
+      ;;
+  esac
+}
+
 # --- selftest hooks (used by bats; not user-facing) ---
 
 case "${1:-}" in
@@ -217,6 +271,16 @@ case "${1:-}" in
     load_locale
     ensure_token
     exit $?
+    ;;
+  --selftest-fetch-key)
+    load_locale
+    TOKEN=$(cat "$CLAUDEV_TOKEN" 2>/dev/null || true)
+    rc=0
+    fetch_key || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      printf "%s\n" "$KEY"
+    fi
+    exit "$rc"
     ;;
 esac
 
