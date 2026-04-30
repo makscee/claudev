@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.1.4"
+CLAUDEV_VERSION="0.1.5"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -140,11 +140,12 @@ with open(p, "w") as f: json.dump(d, f, indent=2)
 ensure_claude() {
   have_claude && return 0
   printf "%s\n" "$L_CLAUDE_NOT_FOUND" >&2
-  if [ ! -t 0 ]; then
+  printf "%s" "$L_CLAUDE_INSTALL_PROMPT"
+  if ! read -r ans; then
+    # EOF (e.g. stdin from /dev/null) — treat as decline.
+    printf "\n"
     return 1
   fi
-  printf "%s" "$L_CLAUDE_INSTALL_PROMPT"
-  read -r ans
   case "$ans" in
     n|N|no|No|NO) return 1 ;;
   esac
@@ -419,7 +420,7 @@ main() {
   load_locale
   print_header
   self_update      # may exec self and never return
-  ensure_claude
+  ensure_claude || exit 1
   ensure_token
   rc=0
   fetch_key || rc=$?
