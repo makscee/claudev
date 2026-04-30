@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.1"
+CLAUDEV_VERSION="0.2.2"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -106,10 +106,29 @@ have_claude() {
   command -v claude >/dev/null 2>&1
 }
 
+bootstrap_node() {
+  # Best-effort node 22 install via the platform's package manager.
+  printf "%s\n" "$L_NODE_INSTALLING" >&2
+  if command -v apt-get >/dev/null 2>&1; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 \
+      && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs >/dev/null 2>&1
+  elif command -v brew >/dev/null 2>&1; then
+    brew install -q node >/dev/null 2>&1
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache nodejs npm >/dev/null 2>&1
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -S --noconfirm nodejs npm >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y nodejs npm >/dev/null 2>&1
+  else
+    return 1
+  fi
+  command -v npm >/dev/null 2>&1
+}
+
 install_claude() {
   if ! command -v npm >/dev/null 2>&1; then
-    printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2
-    return 1
+    bootstrap_node || { printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2; return 1; }
   fi
   npm install -g --include=optional @anthropic-ai/claude-code || return 1
   skip_claude_onboarding
@@ -329,7 +348,9 @@ self_update() {
   last=$(config_get last_update_check)
   : "${last:=0}"
   cache_age=$(( now - last ))
-  if [ "${CLAUDEV_FORCE_UPDATE:-0}" != 1 ] && [ "$cache_age" -lt 86400 ]; then
+  # 1h cache (was 24h) — picks up new versions during active iteration without
+  # forcing a fetch on every invocation. Manual override: CLAUDEV_FORCE_UPDATE=1.
+  if [ "${CLAUDEV_FORCE_UPDATE:-0}" != 1 ] && [ "$cache_age" -lt 3600 ]; then
     return 0
   fi
   manifest=$(curl -fsS "$CLAUDEV_AUTH_HOST/claudev/version.json" 2>/dev/null) || return 0
