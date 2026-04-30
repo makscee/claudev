@@ -14,13 +14,16 @@
   [ -n "${L_CLAUDE_NOT_FOUND:-}" ]
   [ -n "${L_CLAUDE_INSTALL_PROMPT:-}" ]
   [ -n "${L_CLAUDE_INSTALL_FAILED:-}" ]
-  [ -n "${L_PASTE_CODE:-}" ]
-  [ -n "${L_INVALID_CODE:-}" ]
   [ -n "${L_TOO_MANY_ATTEMPTS:-}" ]
   [ -n "${L_NETWORK_ERROR:-}" ]
   [ -n "${L_SESSION_REVOKED:-}" ]
   [ -n "${L_POOL_EMPTY:-}" ]
   [ -n "${L_POOL_BAD_KEY:-}" ]
+  [ -n "${L_ENTER_CODE:-}" ]
+  [ -n "${L_CODE_INVALID_FORMAT:-}" ]
+  [ -n "${L_CODE_EXPIRED_OR_USED:-}" ]
+  [ -n "${L_CODE_NOT_FOUND:-}" ]
+  [ -n "${L_LOGIN_OK:-}" ]
 }
 
 @test "ru.sh defines the same keys as en.sh" {

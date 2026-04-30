@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.1.5"
+CLAUDEV_VERSION="0.2.0"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -157,20 +157,7 @@ ensure_claude() {
   return 0
 }
 
-# --- token: validate + save ---
-
-# validate_token TOKEN — returns 0 on HTTP 200, 1 on 401, 2 on network error.
-validate_token() {
-  tok="$1"
-  code=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $tok" \
-    "$CLAUDEV_AUTH_HOST/v1/auth/me" 2>/dev/null) || code="000"
-  case "$code" in
-    200) return 0 ;;
-    401|403) return 1 ;;
-    *) return 2 ;;
-  esac
-}
+# --- token: load from storage ---
 
 ensure_token() {
   # If a stored token is present, return it immediately. Caller (fetch_key) will
@@ -179,35 +166,52 @@ ensure_token() {
     TOKEN=$(cat "$CLAUDEV_TOKEN")
     [ -n "$TOKEN" ] && return 0
   fi
-  attempt=1
-  while [ "$attempt" -le 3 ]; do
-    printf "%s" "$L_PASTE_CODE" >&2
-    # stty -echo: hide pasted code from tty echo.
-    if [ -t 0 ]; then stty -echo 2>/dev/null || true; fi
-    read -r tok
-    if [ -t 0 ]; then stty echo 2>/dev/null || true; echo >&2; fi
-    if [ -z "$tok" ]; then
-      attempt=$((attempt+1)); continue
+  printf "%s\n" "$L_SESSION_REVOKED" >&2
+  return 1
+}
+
+# --- access-code login ---
+
+# cmd_login — prompt for an access code, exchange it for a session token.
+# Accepts up to 3 attempts (client-side format + server-side errors each count).
+cmd_login() {
+  load_locale
+  mkdir -p "$CLAUDEV_HOME"
+
+  attempts=0
+  while [ "$attempts" -lt 3 ]; do
+    printf '%s' "$L_ENTER_CODE"
+    IFS= read -r code || break
+    code_upper=$(printf '%s' "$code" | tr '[:lower:]' '[:upper:]')
+    if ! printf '%s' "$code_upper" | grep -Eq '^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$'; then
+      printf '%s\n' "$L_CODE_INVALID_FORMAT" >&2
+      attempts=$((attempts + 1))
+      continue
     fi
-    if validate_token "$tok"; then
-      mkdir -p "$CLAUDEV_HOME"
-      umask 077
-      printf "%s" "$tok" > "$CLAUDEV_TOKEN"
-      chmod 600 "$CLAUDEV_TOKEN"
-      TOKEN="$tok"
-      return 0
-    fi
-    rc=$?
-    if [ "$rc" = 2 ]; then
-      # shellcheck disable=SC2059
-      printf "${L_NETWORK_ERROR}\n" "$CLAUDEV_AUTH_HOST" >&2
-      exit 2
-    fi
-    # shellcheck disable=SC2059
-    printf "${L_INVALID_CODE}\n" "$attempt" >&2
-    attempt=$((attempt+1))
+    login_tmp=$(mktemp)
+    http_code=$(curl -sS -o "$login_tmp" -w '%{http_code}' \
+      -X POST -H 'Content-Type: application/json' \
+      -d "{\"code\":\"$code_upper\"}" \
+      "$CLAUDEV_AUTH_HOST/v1/auth/access-codes/exchange" 2>/dev/null) || http_code=000
+    body=$(cat "$login_tmp" 2>/dev/null); rm -f "$login_tmp"
+    case "$http_code" in
+      200)
+        login_token=$(printf '%s' "$body" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+        if [ -n "$login_token" ]; then
+          umask 077
+          printf '%s' "$login_token" > "$CLAUDEV_TOKEN"
+          chmod 600 "$CLAUDEV_TOKEN"
+          printf '%s\n' "$L_LOGIN_OK"
+          return 0
+        fi
+        ;;
+      410) printf '%s\n' "$L_CODE_EXPIRED_OR_USED" >&2 ;;
+      400) printf '%s\n' "$L_CODE_INVALID_FORMAT" >&2 ;;
+      *)   printf '%s\n' "$L_CODE_NOT_FOUND" >&2 ;;
+    esac
+    attempts=$((attempts + 1))
   done
-  printf "%s\n" "$L_TOO_MANY_ATTEMPTS" >&2
+  printf '%s\n' "$L_TOO_MANY_ATTEMPTS" >&2
   return 1
 }
 
@@ -301,10 +305,8 @@ dispatch() {
       ;;
     login)
       rm -f "$CLAUDEV_TOKEN"
-      load_locale
-      print_header
-      ensure_token
-      exit 0
+      cmd_login
+      exit $?
       ;;
     update)
       load_locale
@@ -388,8 +390,8 @@ case "${1:-}" in
     install_claude
     exit $?
     ;;
-  --selftest-validate)
-    validate_token "$2"
+  --selftest-login)
+    cmd_login
     exit $?
     ;;
   --selftest-ensure-token)
@@ -421,14 +423,15 @@ main() {
   print_header
   self_update      # may exec self and never return
   ensure_claude || exit 1
-  ensure_token
+  ensure_token || exit 1
   rc=0
   fetch_key || rc=$?
   if [ "$rc" != 0 ]; then
     if [ "$rc" = 10 ]; then
-      TOKEN_FORCE_REPROMPT=1
-      ensure_token || exit 1
-      fetch_key
+      # Token revoked server-side. Session file already removed by fetch_key.
+      # User must run `claudev login` to get a new access code.
+      printf '%s\n' "$L_SESSION_REVOKED" >&2
+      exit 1
     else
       exit "$rc"
     fi
