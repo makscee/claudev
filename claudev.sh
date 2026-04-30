@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.1.3"
+CLAUDEV_VERSION="0.1.4"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -111,7 +111,30 @@ install_claude() {
     printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2
     return 1
   fi
-  npm install -g --include=optional @anthropic-ai/claude-code
+  npm install -g --include=optional @anthropic-ai/claude-code || return 1
+  skip_claude_onboarding
+}
+
+skip_claude_onboarding() {
+  cv=$(claude --version 2>/dev/null | awk '{print $1}')
+  [ -z "$cv" ] && cv="2.0.0"
+  cfg="${HOME}/.claude.json"
+  if command -v python3 >/dev/null 2>&1; then
+    CLAUDEV_CFG="$cfg" CLAUDEV_VER="$cv" python3 -c '
+import json, os
+p = os.environ["CLAUDEV_CFG"]
+v = os.environ["CLAUDEV_VER"]
+try:
+    with open(p) as f: d = json.load(f)
+except Exception:
+    d = {}
+d["hasCompletedOnboarding"] = True
+d["lastOnboardingVersion"] = v
+with open(p, "w") as f: json.dump(d, f, indent=2)
+'
+  elif [ ! -f "$cfg" ]; then
+    printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg"
+  fi
 }
 
 ensure_claude() {

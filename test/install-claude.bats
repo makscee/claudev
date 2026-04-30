@@ -14,12 +14,11 @@ setup() {
 
 # ── Case (a): npm present, install succeeds ─────────────────────────────────
 
-@test "install_claude: npm present and succeeds — have_claude is true after" {
-  # npm stub: writes a stub claude binary to a dir on PATH, exits 0
+@test "install_claude: npm present and succeeds — have_claude true + onboarding skipped" {
+  # npm stub: writes a stub claude binary that prints a version string
   cat > "$STUB_BIN/npm" <<'EOF'
 #!/bin/sh
-# honour --include=optional flag; ignore it; write stub claude
-printf '#!/bin/sh\nexit 0\n' > "$(dirname "$0")/claude"
+printf '#!/bin/sh\necho "2.1.123 (Claude Code)"\n' > "$(dirname "$0")/claude"
 chmod +x "$(dirname "$0")/claude"
 exit 0
 EOF
@@ -27,6 +26,9 @@ EOF
 
   run sh -c "PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-install-claude </dev/null"
   [ "$status" -eq 0 ]
+  [ -f "$HOME/.claude.json" ]
+  grep -q '"hasCompletedOnboarding": true' "$HOME/.claude.json"
+  grep -q '"lastOnboardingVersion": "2.1.123"' "$HOME/.claude.json"
 }
 
 # ── Case (b): npm absent — returns non-zero, prints L_CLAUDE_NEEDS_NODE ─────
