@@ -48,16 +48,44 @@ done
 echo "claudev: installed to $BIN_DIR/claudev"
 
 case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
+  *":$BIN_DIR:"*)
+    # Already in PATH — nothing to do.
+    ;;
   *)
-    cat <<HINT
-
-NOTE: $BIN_DIR is not in your PATH.
-Add it to your shell rc (e.g. ~/.zshrc or ~/.bashrc):
-
-  export PATH="\$HOME/.local/bin:\$PATH"
-
-Then restart your shell, or run \`exec \$SHELL\`.
-HINT
+    # Auto-append export line to the first rc file that exists.
+    # Candidate order: ~/.bashrc, ~/.zshrc, ~/.profile.
+    # If none exists, create ~/.profile.
+    # Single-quotes below are intentional: we want the literal string
+    # '$HOME/.local/bin' written into the rc file, not the expanded path.
+    # shellcheck disable=SC2016
+    EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH" # claudev'
+    _rc_append() {
+      rc="$1"
+      # Idempotent: skip if either quote-style already present.
+      # SC2016: intentional — grep for the literal text in the rc file.
+      # shellcheck disable=SC2016
+      if grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "$rc" 2>/dev/null; then
+        return 0
+      fi
+      if grep -qF "export PATH='\$HOME/.local/bin:\$PATH'" "$rc" 2>/dev/null; then
+        return 0
+      fi
+      printf '\n%s\n' "$EXPORT_LINE" >> "$rc"
+    }
+    rc_updated=""
+    for _candidate in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+      if [ -f "$_candidate" ]; then
+        _rc_append "$_candidate"
+        rc_updated="${rc_updated:+$rc_updated, }$_candidate"
+      fi
+    done
+    if [ -z "$rc_updated" ]; then
+      # No rc file found — create ~/.profile.
+      printf '%s\n' "$EXPORT_LINE" > "$HOME/.profile"
+      rc_updated="$HOME/.profile"
+    fi
+    # SC2016: $SHELL is intentional — we want the literal text in the message.
+    # shellcheck disable=SC2016
+    printf 'claudev: PATH updated in %s. Run `exec $SHELL` (or open a new shell) to use claudev.\n' "$rc_updated"
     ;;
 esac
