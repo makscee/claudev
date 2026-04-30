@@ -21,6 +21,15 @@ teardown() { mock_stop; }
   [ "$output" = "sk-ant-oat-XYZ" ]
 }
 
+@test "fetch_key prints key on 200 with sk-ant-oat01 shape" {
+  body='{"token":"sk-ant-oat01-ABC123","keyId":"k1","keyName":"pool-prod-01","expiresAt":"2026-12-31T00:00:00Z"}'
+  printf 'HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: application/json\r\n\r\n%s' "${#body}" "$body" > "$BATS_TEST_TMPDIR/resp"
+  mock_start "$BATS_TEST_TMPDIR/resp"
+  run sh -c "CLAUDEV_KEYS_HOST=http://127.0.0.1:$MOCK_PORT $CLAUDEV --selftest-fetch-key"
+  [ "$status" -eq 0 ]
+  [ "$output" = "sk-ant-oat01-ABC123" ]
+}
+
 @test "fetch_key exits 3 on non-OAuth shape" {
   body='{"token":"sk-ant-api03-XYZ","keyId":"k1","keyName":"pool-prod-01","expiresAt":"2026-12-31T00:00:00Z"}'
   printf 'HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s' "${#body}" "$body" > "$BATS_TEST_TMPDIR/resp"

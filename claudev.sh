@@ -229,7 +229,7 @@ fetch_key() {
   KEY=$(extract_json_string token < "$resp_file")
   rm -f "$resp_file"
   case "$KEY" in
-    sk-ant-oat-*) return 0 ;;
+    sk-ant-oat-*|sk-ant-oat[0-9][0-9]-*) return 0 ;;
     *)
       printf "%s\n" "$L_POOL_BAD_KEY" >&2
       exit 3

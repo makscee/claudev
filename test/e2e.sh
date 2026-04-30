@@ -35,9 +35,9 @@ chmod 600 "$HOME/.claudev/token"
 echo "→ pre-asserting pool key shape"
 key_resp=$(curl -fsS -H "Authorization: Bearer $CLAUDEV_E2E_TOKEN" \
   "$CLAUDEV_KEYS_HOST/v1/keys/me") || fail "could not reach $CLAUDEV_KEYS_HOST/v1/keys/me"
-echo "$key_resp" | grep -qE '"token":"sk-ant-oat-' \
+echo "$key_resp" | grep -qE '"token":"sk-ant-oat([0-9]{2})?-' \
   || fail "pool returned non-OAuth token shape: $key_resp (placeholder regression?)"
-ok "pool serves sk-ant-oat- token"
+ok "pool serves sk-ant-oat(NN)- token"
 
 # 2. Positive: claudev --print "say hi"
 echo "→ claudev --print 'say hi'"
