@@ -21,7 +21,7 @@ write_mock_version_resp() {
 
 @test "self_update: skip when remote version matches local" {
   resp=$(mktemp)
-  write_mock_version_resp "0.1.0" "deadbeef" > "$resp"
+  write_mock_version_resp "0.1.1" "deadbeef" > "$resp"
   mock_start "$resp"
   run sh -c "CLAUDEV_AUTH_HOST=http://127.0.0.1:$MOCK_PORT CLAUDEV_FORCE_UPDATE=1 $CLAUDEV --selftest-self-update"
   [ "$status" -eq 0 ]
