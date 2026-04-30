@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.1.0"
+CLAUDEV_VERSION="0.1.1"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -389,11 +389,12 @@ main() {
   self_update      # may exec self and never return
   ensure_claude
   ensure_token
-  if ! fetch_key; then
-    rc=$?
+  rc=0
+  fetch_key || rc=$?
+  if [ "$rc" != 0 ]; then
     if [ "$rc" = 10 ]; then
       TOKEN_FORCE_REPROMPT=1
-      ensure_token
+      ensure_token || exit 1
       fetch_key
     else
       exit "$rc"
