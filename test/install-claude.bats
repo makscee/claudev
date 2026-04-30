@@ -1,0 +1,53 @@
+#!/usr/bin/env bats
+# Tests for install_claude() — npm-first path (no curl fallback)
+
+setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME/.claudev"
+  printf "locale=en\n" > "$HOME/.claudev/config"
+  CLAUDEV="$BATS_TEST_DIRNAME/../claudev.sh"
+
+  # Bin dir for stubs — prepended to PATH in each test
+  STUB_BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$STUB_BIN"
+}
+
+# ── Case (a): npm present, install succeeds ─────────────────────────────────
+
+@test "install_claude: npm present and succeeds — have_claude is true after" {
+  # npm stub: writes a stub claude binary to a dir on PATH, exits 0
+  cat > "$STUB_BIN/npm" <<'EOF'
+#!/bin/sh
+# honour --include=optional flag; ignore it; write stub claude
+printf '#!/bin/sh\nexit 0\n' > "$(dirname "$0")/claude"
+chmod +x "$(dirname "$0")/claude"
+exit 0
+EOF
+  chmod +x "$STUB_BIN/npm"
+
+  run sh -c "PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-install-claude </dev/null"
+  [ "$status" -eq 0 ]
+}
+
+# ── Case (b): npm absent — returns non-zero, prints L_CLAUDE_NEEDS_NODE ─────
+
+@test "install_claude: npm absent — exits non-zero and prints needs-node message" {
+  # PATH has no npm
+  run sh -c "echo y | PATH=/usr/bin:/bin HOME=\"$HOME\" $CLAUDEV --selftest-install-claude"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi "node"
+}
+
+# ── Case (c): npm present but fails — ensure_claude prints install-failed ───
+
+@test "install_claude: npm present but exits 1 — propagates non-zero" {
+  # npm stub: exits 1, does NOT write claude
+  cat > "$STUB_BIN/npm" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+  chmod +x "$STUB_BIN/npm"
+
+  run sh -c "PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-install-claude </dev/null"
+  [ "$status" -ne 0 ]
+}
