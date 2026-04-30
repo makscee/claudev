@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.0"
+CLAUDEV_VERSION="0.2.1"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -166,8 +166,12 @@ ensure_token() {
     TOKEN=$(cat "$CLAUDEV_TOKEN")
     [ -n "$TOKEN" ] && return 0
   fi
-  printf "%s\n" "$L_SESSION_REVOKED" >&2
-  return 1
+  # No token (fresh install OR fetch_key just removed a revoked one). Drop into
+  # the login flow inline so the user doesn't have to know to run `claudev login`.
+  cmd_login || return 1
+  TOKEN=$(cat "$CLAUDEV_TOKEN" 2>/dev/null)
+  [ -n "$TOKEN" ] || return 1
+  return 0
 }
 
 # --- access-code login ---
@@ -426,16 +430,14 @@ main() {
   ensure_token || exit 1
   rc=0
   fetch_key || rc=$?
-  if [ "$rc" != 0 ]; then
-    if [ "$rc" = 10 ]; then
-      # Token revoked server-side. Session file already removed by fetch_key.
-      # User must run `claudev login` to get a new access code.
-      printf '%s\n' "$L_SESSION_REVOKED" >&2
-      exit 1
-    else
-      exit "$rc"
-    fi
+  if [ "$rc" = 10 ]; then
+    # Token revoked server-side. Session file already removed by fetch_key.
+    # Drop into login inline + retry fetch_key once.
+    ensure_token || exit 1
+    rc=0
+    fetch_key || rc=$?
   fi
+  [ "$rc" = 0 ] || exit "$rc"
   exec env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@"
 }
 

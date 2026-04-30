@@ -9,11 +9,14 @@ setup() {
   CLAUDEV="$BATS_TEST_DIRNAME/../claudev.sh"
 }
 
-@test "ensure_token: exits 1 and prints revoked when no token file" {
+@test "ensure_token: drops into cmd_login when no token file (v0.2.1+)" {
+  # v0.2.1: ensure_token no longer just exits — it inlines cmd_login so the
+  # user doesn't need to know to run `claudev login`. With closed stdin the
+  # login loop bails on first `read` and exits via L_TOO_MANY_ATTEMPTS.
   rm -f "$HOME/.claudev/token"
-  run sh -c "$CLAUDEV --selftest-ensure-token"
+  run sh -c "$CLAUDEV --selftest-ensure-token < /dev/null"
   [ "$status" -eq 1 ]
-  [[ "$output" =~ "session revoked" ]]
+  [[ "$output" =~ "access code" ]] || [[ "$output" =~ "код доступа" ]] || [[ "$output" =~ "Too many" ]]
 }
 
 @test "ensure_token: exits 0 and sets TOKEN when token file present" {
