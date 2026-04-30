@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.1.2"
+CLAUDEV_VERSION="0.1.3"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -107,7 +107,11 @@ have_claude() {
 }
 
 install_claude() {
-  curl -fsSL https://claude.ai/install.sh | bash
+  if ! command -v npm >/dev/null 2>&1; then
+    printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2
+    return 1
+  fi
+  npm install -g --include=optional @anthropic-ai/claude-code
 }
 
 ensure_claude() {
@@ -353,6 +357,11 @@ case "${1:-}" in
   --selftest-ensure-claude)
     load_locale
     ensure_claude
+    exit $?
+    ;;
+  --selftest-install-claude)
+    load_locale
+    install_claude
     exit $?
     ;;
   --selftest-validate)
