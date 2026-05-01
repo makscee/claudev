@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.6"
+CLAUDEV_VERSION="0.2.7"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -150,6 +150,11 @@ install_claude() {
     bootstrap_node || { printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2; return 1; }
   fi
   npm install -g --include=optional @anthropic-ai/claude-code || return 1
+  # Best-effort pre-skip onboarding. Failure (disk full, perms, malformed
+  # existing JSON) prints a warning but MUST NOT fail install — user already
+  # got claude installed; onboarding-skip is UX polish.
+  skip_claude_onboarding || printf "warning: could not pre-skip claude onboarding\n" >&2
+  return 0
 }
 
 skip_claude_onboarding() {
@@ -167,11 +172,14 @@ except Exception:
     d = {}
 d["hasCompletedOnboarding"] = True
 d["lastOnboardingVersion"] = v
-with open(p, "w") as f: json.dump(d, f, indent=2)
-'
+tmp = p + ".tmp." + str(os.getpid())
+with open(tmp, "w") as f: json.dump(d, f, indent=2)
+os.replace(tmp, p)
+' || return 1
   elif [ ! -f "$cfg" ]; then
-    printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg"
+    printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg" || return 1
   fi
+  return 0
 }
 
 ensure_claude() {
