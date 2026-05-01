@@ -18,3 +18,4 @@ L_CODE_NOT_FOUND='Code not recognized. Check for typos.'
 L_LOGIN_OK='Code accepted. Session saved to ~/.claudev/token.'
 L_TOO_MANY_ATTEMPTS="too many invalid attempts; aborting"
 L_NETWORK_ERROR="network error reaching %s; aborting"
+L_WELCOME="Welcome %s"

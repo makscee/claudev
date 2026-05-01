@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.4"
+CLAUDEV_VERSION="0.2.5"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -243,6 +243,35 @@ cmd_login() {
   return 1
 }
 
+# --- /v1/auth/me + welcome ---
+
+fetch_me() {
+  # Best-effort: GET /v1/auth/me, cache username (email local-part) in config.
+  # Sets caller-visible USERNAME on success; silent on any failure.
+  USERNAME=""
+  if [ -z "${TOKEN:-}" ]; then
+    TOKEN=$(cat "$CLAUDEV_TOKEN" 2>/dev/null || true)
+  fi
+  [ -n "${TOKEN:-}" ] || return 0
+  me_resp=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$CLAUDEV_AUTH_HOST/v1/auth/me" 2>/dev/null) || return 0
+  email=$(printf "%s" "$me_resp" | extract_json_string email)
+  [ -n "$email" ] || return 0
+  USERNAME="${email%@*}"
+  config_set username "$USERNAME"
+}
+
+print_welcome() {
+  uname=$(config_get username)
+  if [ -z "$uname" ]; then
+    fetch_me
+    uname="${USERNAME:-}"
+  fi
+  [ -n "$uname" ] || return 0
+  # shellcheck disable=SC2059
+  printf "${L_WELCOME}\n" "$uname"
+}
+
 # --- pool key fetch ---
 
 # extract_json_string KEY — reads json on stdin, prints first string-typed
@@ -329,10 +358,12 @@ dispatch() {
       ;;
     logout)
       rm -f "$CLAUDEV_TOKEN"
+      config_set username ""
       exit 0
       ;;
     login)
       rm -f "$CLAUDEV_TOKEN"
+      config_set username ""
       cmd_login
       exit $?
       ;;
@@ -454,6 +485,7 @@ main() {
   self_update      # may exec self and never return
   ensure_claude || exit 1
   ensure_token || exit 1
+  print_welcome
   rc=0
   fetch_key || rc=$?
   if [ "$rc" = 10 ]; then
