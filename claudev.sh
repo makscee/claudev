@@ -150,6 +150,11 @@ install_claude() {
     bootstrap_node || { printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2; return 1; }
   fi
   npm install -g --include=optional @anthropic-ai/claude-code || return 1
+  # Best-effort pre-skip onboarding. Failure (disk full, perms, malformed
+  # existing JSON) prints a warning but MUST NOT fail install — user already
+  # got claude installed; onboarding-skip is UX polish.
+  skip_claude_onboarding || printf "warning: could not pre-skip claude onboarding\n" >&2
+  return 0
 }
 
 skip_claude_onboarding() {
@@ -170,10 +175,11 @@ d["lastOnboardingVersion"] = v
 tmp = p + ".tmp." + str(os.getpid())
 with open(tmp, "w") as f: json.dump(d, f, indent=2)
 os.replace(tmp, p)
-'
+' || return 1
   elif [ ! -f "$cfg" ]; then
-    printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg"
+    printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg" || return 1
   fi
+  return 0
 }
 
 ensure_claude() {
