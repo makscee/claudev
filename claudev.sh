@@ -167,7 +167,9 @@ except Exception:
     d = {}
 d["hasCompletedOnboarding"] = True
 d["lastOnboardingVersion"] = v
-with open(p, "w") as f: json.dump(d, f, indent=2)
+tmp = p + ".tmp." + str(os.getpid())
+with open(tmp, "w") as f: json.dump(d, f, indent=2)
+os.replace(tmp, p)
 '
   elif [ ! -f "$cfg" ]; then
     printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg"
