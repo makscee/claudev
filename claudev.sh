@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.2"
+CLAUDEV_VERSION="0.2.3"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -131,7 +131,6 @@ install_claude() {
     bootstrap_node || { printf "%s\n" "$L_CLAUDE_NEEDS_NODE" >&2; return 1; }
   fi
   npm install -g --include=optional @anthropic-ai/claude-code || return 1
-  skip_claude_onboarding
 }
 
 skip_claude_onboarding() {
@@ -157,7 +156,12 @@ with open(p, "w") as f: json.dump(d, f, indent=2)
 }
 
 ensure_claude() {
-  have_claude && return 0
+  if have_claude; then
+    # Always silence onboarding — friend may have installed claude separately
+    # and never completed (or skipped) its first-run wizard.
+    skip_claude_onboarding
+    return 0
+  fi
   printf "%s\n" "$L_CLAUDE_NOT_FOUND" >&2
   printf "%s" "$L_CLAUDE_INSTALL_PROMPT"
   if ! read -r ans; then
@@ -173,6 +177,7 @@ ensure_claude() {
     printf "%s\n" "$L_CLAUDE_INSTALL_FAILED" >&2
     return 1
   fi
+  skip_claude_onboarding
   return 0
 }
 

@@ -73,16 +73,25 @@ case ":$PATH:" in
       printf '\n%s\n' "$EXPORT_LINE" >> "$rc"
     }
     rc_updated=""
-    for _candidate in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    for _candidate in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.profile"; do
       if [ -f "$_candidate" ]; then
         _rc_append "$_candidate"
         rc_updated="${rc_updated:+$rc_updated, }$_candidate"
       fi
     done
     if [ -z "$rc_updated" ]; then
-      # No rc file found — create ~/.profile.
-      printf '%s\n' "$EXPORT_LINE" > "$HOME/.profile"
-      rc_updated="$HOME/.profile"
+      # No rc file found — pick the right one for the user's shell.
+      # zsh (macOS default) ignores ~/.profile; create ~/.zshrc instead.
+      case "${SHELL:-}" in
+        */zsh)
+          _fallback="$HOME/.zshrc" ;;
+        */bash)
+          _fallback="$HOME/.bashrc" ;;
+        *)
+          _fallback="$HOME/.profile" ;;
+      esac
+      printf '%s\n' "$EXPORT_LINE" > "$_fallback"
+      rc_updated="$_fallback"
     fi
     # SC2016: $SHELL is intentional — we want the literal text in the message.
     # shellcheck disable=SC2016
