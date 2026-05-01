@@ -7,6 +7,11 @@
 #   CLAUDEV_E2E_USER_ID     the user row id (for cleanup)
 #   CLAUDEV_AUTH_HOST       (optional) defaults to https://auth.makscee.ru
 #   CLAUDEV_KEYS_HOST       (optional) defaults to https://keys.makscee.ru
+#   CLAUDEV_E2E_USE_DOCKER_EXEC  (optional) =1 → route /v1/admin/* via ssh + docker exec
+#   CLAUDEV_E2E_DOCKER_HOST      (optional) defaults to mcow
+#   CLAUDEV_E2E_DOCKER_CONTAINER (optional) defaults to void-auth
+# Off-tailnet runs (e.g. this mac, public DNS → public IP) hit Caddy 403 on /v1/admin/*.
+# Set CLAUDEV_E2E_USE_DOCKER_EXEC=1 to bypass via mcow ssh + container-local curl.
 #
 # Asserts:
 #   1. Pool key shape (sk-ant-oat-) — catches placeholder regression
@@ -23,6 +28,16 @@ export CLAUDEV_AUTH_HOST CLAUDEV_KEYS_HOST
 
 fail() { echo "E2E FAIL: $*" >&2; exit 1; }
 ok()   { echo "E2E ok: $*"; }
+
+admin_delete() {
+  if [ "${CLAUDEV_E2E_USE_DOCKER_EXEC:-0}" = "1" ]; then
+    _admin_host=${CLAUDEV_E2E_DOCKER_HOST:-mcow}
+    _admin_container=${CLAUDEV_E2E_DOCKER_CONTAINER:-void-auth}
+    ssh "root@$_admin_host" "docker exec $_admin_container curl -fsS -X DELETE 'http://localhost:3000$1'"
+  else
+    curl -fsS -X DELETE "$CLAUDEV_AUTH_HOST$1"
+  fi
+}
 
 # Clean prior state
 rm -rf "$HOME/.claudev"
@@ -49,8 +64,8 @@ ok "claudev positive: $(echo "$out" | head -c 60)..."
 
 # 3. Negative: revoke session, expect failure
 echo "→ revoking session $CLAUDEV_E2E_SESSION_ID"
-curl -fsS -X DELETE "$CLAUDEV_AUTH_HOST/v1/admin/sessions/$CLAUDEV_E2E_SESSION_ID" >/dev/null \
-  || fail "could not revoke session (admin endpoint reachable?)"
+admin_delete "/v1/admin/sessions/$CLAUDEV_E2E_SESSION_ID" >/dev/null \
+  || fail "could not revoke session (admin endpoint reachable? off-tailnet — set CLAUDEV_E2E_USE_DOCKER_EXEC=1)"
 out2=$(claudev --print "still alive?" 2>&1) && fail "claudev should have failed after revoke; got: $out2"
 echo "$out2" | grep -qE 'session revoked|сессия отозвана' \
   || fail "expected localized 'session revoked' message; got: $out2"
@@ -59,7 +74,7 @@ ok "claudev negative: detected revoked session"
 # 4. Cleanup
 echo "→ cleanup"
 claudev logout
-curl -fsS -X DELETE "$CLAUDEV_AUTH_HOST/v1/admin/users/$CLAUDEV_E2E_USER_ID" >/dev/null 2>&1 || true
+admin_delete "/v1/admin/users/$CLAUDEV_E2E_USER_ID" >/dev/null 2>&1 || true
 ok "cleanup done"
 
 echo "E2E PASS"
