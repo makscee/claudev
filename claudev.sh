@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.5"
+CLAUDEV_VERSION="0.2.6"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -57,6 +57,18 @@ config_set() {
 
 # --- locale ---
 
+refresh_locales() {
+  # Best-effort fetch of all locale files into the installed share dir.
+  # Used by load_locale to self-heal when self_update brought a newer
+  # claudev.sh that references locale strings not in the on-disk files.
+  share="${HOME}/.local/share/claudev/locales"
+  mkdir -p "$share"
+  for _lng in en ru; do
+    curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/locales/${_lng}.sh" \
+      -o "$share/${_lng}.sh" 2>/dev/null || true
+  done
+}
+
 load_locale() {
   lang=$(config_get locale)
   if [ -z "$lang" ]; then
@@ -72,6 +84,13 @@ load_locale() {
   [ -f "$loc_file" ] || { echo "claudev: missing locale file $lang.sh" >&2; exit 1; }
   # shellcheck disable=SC1090
   . "$loc_file"
+  # Self-heal: if a recent locale key is missing (drift between bumped
+  # claudev.sh and on-disk locale files), refresh from auth host once.
+  if [ -z "${L_WELCOME:-}" ]; then
+    refresh_locales
+    # shellcheck disable=SC1090
+    [ -f "$loc_file" ] && . "$loc_file"
+  fi
 }
 
 bootstrap_locale() {
@@ -268,8 +287,10 @@ print_welcome() {
     uname="${USERNAME:-}"
   fi
   [ -n "$uname" ] || return 0
+  fmt="${L_WELCOME:-}"
+  [ -n "$fmt" ] || return 0
   # shellcheck disable=SC2059
-  printf "${L_WELCOME}\n" "$uname"
+  printf "${fmt}\n" "$uname"
 }
 
 # --- pool key fetch ---
@@ -417,6 +438,9 @@ self_update() {
   fi
   chmod +x "$tmp"
   mv -f "$tmp" "$0"
+  # Refresh locale bundle alongside binary so new strings (e.g. L_WELCOME)
+  # land before the re-exec sources them.
+  refresh_locales
   exec "$0" "$@"
 }
 
