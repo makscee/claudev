@@ -3,8 +3,14 @@
 # against the published manifest, drops binary into ~/.local/bin, locales into
 # ~/.local/share/claudev/locales/.
 #
-# Usage:
+# Usage (recommended — activates PATH in current shell on first install):
+#   eval "$(curl -fsSL https://auth.makscee.ru/claudev/install.sh | sh)"
+#
+# Plain form (works, but new shell needed for PATH on first install):
 #   curl -fsSL https://auth.makscee.ru/claudev/install.sh | sh
+#
+# All progress messages go to stderr. The single line printed on stdout (if
+# any) is the `export PATH=...` needed for the running shell — safe to eval.
 #
 # Env:
 #   CLAUDEV_AUTH_HOST              default https://auth.makscee.ru
@@ -20,11 +26,11 @@ mkdir -p "$BIN_DIR" "$SHARE_DIR/locales"
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-echo "claudev: downloading from $CLAUDEV_AUTH_HOST/claudev/claudev.sh"
+echo "claudev: downloading from $CLAUDEV_AUTH_HOST/claudev/claudev.sh" >&2
 curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/claudev.sh" -o "$tmp"
 
 if [ "${CLAUDEV_INSTALL_SKIP_VERIFY:-0}" != 1 ]; then
-  echo "claudev: verifying sha256"
+  echo "claudev: verifying sha256" >&2
   manifest=$(curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/version.json")
   expected_sha=$(printf "%s" "$manifest" | awk -F\" '/sha256_sh/{ for (i=1;i<=NF;i++) if ($i=="sha256_sh") { print $(i+2); exit } }')
   actual_sha=$(shasum -a 256 "$tmp" 2>/dev/null | awk '{print $1}')
@@ -45,7 +51,7 @@ for lang in en ru; do
     -o "$SHARE_DIR/locales/${lang}.sh" 2>/dev/null || true
 done
 
-echo "claudev: installed to $BIN_DIR/claudev"
+echo "claudev: installed to $BIN_DIR/claudev" >&2
 
 case ":$PATH:" in
   *":$BIN_DIR:"*)
@@ -93,8 +99,13 @@ case ":$PATH:" in
       printf '%s\n' "$EXPORT_LINE" > "$_fallback"
       rc_updated="$_fallback"
     fi
-    # SC2016: $SHELL is intentional — we want the literal text in the message.
+    # SC2016: $SHELL / $HOME are intentional — literal text in stderr message
+    # and in the eval-able stdout line.
     # shellcheck disable=SC2016
-    printf 'claudev: PATH updated in %s. Run `exec $SHELL` (or open a new shell) to use claudev.\n' "$rc_updated"
+    printf 'claudev: PATH updated in %s. New shells pick it up automatically.\n' "$rc_updated" >&2
+    # shellcheck disable=SC2016
+    printf 'claudev: to use claudev in THIS shell: eval the line below, or re-run install via `eval "$(curl -fsSL %s/claudev/install.sh | sh)"`.\n' "$CLAUDEV_AUTH_HOST" >&2
+    # The single stdout line — designed for `eval "$(... | sh)"`.
+    printf '%s\n' "$EXPORT_LINE"
     ;;
 esac

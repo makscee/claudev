@@ -5,8 +5,10 @@ Thin shell wrapper that authenticates against [void-auth](https://github.com/mak
 ## Install (macOS / Linux)
 
 ```sh
-curl -fsSL https://auth.makscee.ru/claudev/install.sh | sh
+eval "$(curl -fsSL https://auth.makscee.ru/claudev/install.sh | sh)"
 ```
+
+The `eval` form activates `~/.local/bin` on `PATH` in the current shell on first install, so you can run `claudev` immediately. The plain `curl … | sh` form also works but won't put `claudev` on `PATH` until you open a new shell.
 
 Then run `claudev` to log in (you'll need an admin-issued access code) and launch Claude Code.
 
