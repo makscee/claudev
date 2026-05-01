@@ -53,3 +53,31 @@ EOF
   run sh -c "PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-install-claude </dev/null"
   [ "$status" -ne 0 ]
 }
+
+# ── Case (d): pre-existing ~/.claude.json — merge preserves keys ────────────
+
+@test "install_claude: merges with existing ~/.claude.json (preserves installMethod + userID)" {
+  # npm stub: writes a stub claude binary that prints a version string
+  cat > "$STUB_BIN/npm" <<'EOF'
+#!/bin/sh
+printf '#!/bin/sh\necho "2.1.123 (Claude Code)"\n' > "$(dirname "$0")/claude"
+chmod +x "$(dirname "$0")/claude"
+exit 0
+EOF
+  chmod +x "$STUB_BIN/npm"
+
+  # Pre-seed ~/.claude.json with caller-set keys that must survive the merge
+  printf '{"installMethod":"native","userID":"abc"}\n' > "$HOME/.claude.json"
+
+  run sh -c "PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-install-claude </dev/null"
+  [ "$status" -eq 0 ]
+  [ -f "$HOME/.claude.json" ]
+
+  # All four keys must be present after merge
+  [ "$(jq -r '.installMethod' "$HOME/.claude.json")" = "native" ]
+  [ "$(jq -r '.userID' "$HOME/.claude.json")" = "abc" ]
+  [ "$(jq -r '.hasCompletedOnboarding' "$HOME/.claude.json")" = "true" ]
+  v=$(jq -r '.lastOnboardingVersion' "$HOME/.claude.json")
+  [ -n "$v" ]
+  [ "$v" != "null" ]
+}
