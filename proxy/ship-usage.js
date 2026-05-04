@@ -128,8 +128,77 @@ async function shipFile(filePath) {
   return { shipped };
 }
 
+function isOrphan(filePath) {
+  const basename = path.basename(filePath);
+  const match = basename.match(/^session-(\d+)\.jsonl$/);
+  if (!match) return false;
+
+  const pid = parseInt(match[1], 10);
+
+  try {
+    process.kill(pid, 0);
+    // PID alive — check mtime for zombie/stale
+    const stat = fs.statSync(filePath);
+    return (Date.now() - stat.mtimeMs) > STALE_MTIME_MS;
+  } catch {
+    return true;
+  }
+}
+
+async function sweep() {
+  if (!fs.existsSync(USAGE_DIR)) return;
+
+  const files = fs.readdirSync(USAGE_DIR)
+    .filter((f) => /^session-.*\.jsonl$/.test(f))
+    .map((f) => {
+      const full = path.join(USAGE_DIR, f);
+      const stat = fs.statSync(full);
+      return { path: full, mtimeMs: stat.mtimeMs };
+    })
+    .sort((a, b) => a.mtimeMs - b.mtimeMs)
+    .slice(0, SWEEP_CAP);
+
+  for (const file of files) {
+    if (!isOrphan(file.path)) continue;
+    try {
+      await shipFile(file.path);
+    } catch (e) {
+      process.stderr.write(`ship-usage: sweep failed for ${path.basename(file.path)}: ${e.message}\n`);
+    }
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+
+  if (args[0] === '--sweep') {
+    await sweep();
+    process.exit(0);
+  }
+
+  if (args.length !== 1) {
+    process.stderr.write('Usage: ship-usage.js <path-to-jsonl> | --sweep\n');
+    process.exit(1);
+  }
+
+  const filePath = args[0];
+  if (!fs.existsSync(filePath)) {
+    process.exit(0);
+  }
+
+  await shipFile(filePath);
+}
+
+if (require.main === module) {
+  main().catch((e) => {
+    process.stderr.write(`ship-usage: ${e.message}\n`);
+    process.exit(1);
+  });
+}
+
 module.exports = {
   parseJsonl, chunkEvents, postBatch, shipFile,
   readOffset, writeOffset, deleteOffset,
+  isOrphan, sweep,
   BATCH_SIZE, SWEEP_CAP, STALE_MTIME_MS,
 };

@@ -242,6 +242,122 @@ describe('offset sidecar', () => {
   });
 });
 
+const fs = require('node:fs');
+
+describe('isOrphan', () => {
+  it('returns true for dead PID', () => {
+    delete require.cache[require.resolve('../ship-usage.js')];
+    const { isOrphan } = require('../ship-usage.js');
+
+    const tmp = makeTmpDir();
+    // PID 99999999 almost certainly doesn't exist
+    const filePath = join(tmp, 'session-99999999.jsonl');
+    writeFileSync(filePath, '{"ts":"2026-01-01"}\n');
+
+    assert.equal(isOrphan(filePath), true);
+  });
+
+  it('returns false for alive PID with fresh mtime', () => {
+    delete require.cache[require.resolve('../ship-usage.js')];
+    const { isOrphan } = require('../ship-usage.js');
+
+    const tmp = makeTmpDir();
+    const filePath = join(tmp, `session-${process.pid}.jsonl`);
+    writeFileSync(filePath, '{"ts":"2026-01-01"}\n');
+
+    assert.equal(isOrphan(filePath), false);
+  });
+
+  it('returns true for alive PID with stale mtime (>60s)', () => {
+    delete require.cache[require.resolve('../ship-usage.js')];
+    const { isOrphan } = require('../ship-usage.js');
+
+    const tmp = makeTmpDir();
+    const filePath = join(tmp, `session-${process.pid}.jsonl`);
+    writeFileSync(filePath, '{"ts":"2026-01-01"}\n');
+    // Backdate mtime by 120 seconds
+    const past = new Date(Date.now() - 120_000);
+    fs.utimesSync(filePath, past, past);
+
+    assert.equal(isOrphan(filePath), true);
+  });
+
+  it('returns false for non-numeric PID in filename', () => {
+    delete require.cache[require.resolve('../ship-usage.js')];
+    const { isOrphan } = require('../ship-usage.js');
+
+    const tmp = makeTmpDir();
+    const filePath = join(tmp, 'session-abc.jsonl');
+    writeFileSync(filePath, '{"ts":"2026-01-01"}\n');
+
+    assert.equal(isOrphan(filePath), false);
+  });
+});
+
+describe('sweep', () => {
+  it('ships orphaned files and respects cap', async () => {
+    let shipped = [];
+    const { server, port, url } = await startMockServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => body += c);
+      req.on('end', () => {
+        shipped.push(JSON.parse(body));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ inserted: 1, skipped: 0 }));
+      });
+    });
+
+    const tmp = makeTmpDir();
+    const usageDir = join(tmp, 'usage');
+    mkdirSync(usageDir, { recursive: true });
+    const tokenPath = join(tmp, 'token');
+    writeFileSync(tokenPath, 'my-token\n');
+
+    // Create 3 orphan files with dead PIDs
+    for (let i = 0; i < 3; i++) {
+      const f = join(usageDir, `session-${99999990 + i}.jsonl`);
+      writeFileSync(f, `{"ts":"2026-01-0${i + 1}","input_tokens":${i}}\n`);
+    }
+
+    delete require.cache[require.resolve('../ship-usage.js')];
+    process.env.CLAUDEV_USAGE_API = url;
+    process.env.CLAUDEV_TOKEN_PATH = tokenPath;
+    process.env.CLAUDEV_USAGE_DIR = usageDir;
+    const { sweep } = require('../ship-usage.js');
+
+    await sweep();
+
+    assert.equal(shipped.length, 3);
+    // All files should be deleted
+    const remaining = fs.readdirSync(usageDir).filter(f => f.endsWith('.jsonl'));
+    assert.equal(remaining.length, 0);
+
+    await stopServer(server);
+    delete process.env.CLAUDEV_USAGE_API;
+    delete process.env.CLAUDEV_TOKEN_PATH;
+    delete process.env.CLAUDEV_USAGE_DIR;
+  });
+
+  it('skips files belonging to alive processes', async () => {
+    const tmp = makeTmpDir();
+    const usageDir = join(tmp, 'usage');
+    mkdirSync(usageDir, { recursive: true });
+
+    const f = join(usageDir, `session-${process.pid}.jsonl`);
+    writeFileSync(f, '{"ts":"2026-01-01"}\n');
+
+    delete require.cache[require.resolve('../ship-usage.js')];
+    process.env.CLAUDEV_USAGE_DIR = usageDir;
+    const { sweep } = require('../ship-usage.js');
+
+    await sweep();
+
+    assert.equal(existsSync(f), true);
+
+    delete process.env.CLAUDEV_USAGE_DIR;
+  });
+});
+
 describe('shipFile', () => {
   it('ships events and deletes file on success', async () => {
     let batches = [];
