@@ -562,22 +562,20 @@ stop_proxy() {
   kill "$PROXY_PID" 2>/dev/null || true
   wait "$PROXY_PID" 2>/dev/null || true
   PROXY_PID=""
+  # Ship usage data (5s timeout, silent failure — orphan sweep catches it)
+  if [ -f "$CLAUDEV_HOME/usage/session-$$.jsonl" ] && command -v node >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      timeout 5 node "$CLAUDEV_PROXY_DIR/ship-usage.js" "$CLAUDEV_HOME/usage/session-$$.jsonl" 2>/dev/null || true
+    else
+      node "$CLAUDEV_PROXY_DIR/ship-usage.js" "$CLAUDEV_HOME/usage/session-$$.jsonl" 2>/dev/null || true
+    fi
+  fi
 }
 
 sweep_orphan_jsonl() {
-  usage_dir="$CLAUDEV_HOME/usage"
-  [ -d "$usage_dir" ] || return 0
-  count=0
-  for f in "$usage_dir"/session-*.jsonl; do
-    [ -f "$f" ] || continue
-    opid=$(echo "$f" | sed 's/.*session-\([0-9A-Za-z_-]*\)\.jsonl/\1/')
-    case "$opid" in
-      *[!0-9]*) continue ;;
-    esac
-    kill -0 "$opid" 2>/dev/null || count=$((count + 1))
-  done
-  [ "$count" -gt 0 ] && printf "claudev: %d orphaned usage file(s) pending shipment\n" "$count" >&2
-  return 0
+  command -v node >/dev/null 2>&1 || return 0
+  [ -n "$CLAUDEV_PROXY_DIR" ] || find_proxy_dir 2>/dev/null || return 0
+  node "$CLAUDEV_PROXY_DIR/ship-usage.js" --sweep 2>/dev/null || true
 }
 
 # --- main pipeline ---
