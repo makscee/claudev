@@ -509,6 +509,77 @@ case "${1:-}" in
     ;;
 esac
 
+# --- proxy lifecycle ---
+
+CLAUDEV_PROXY_DIR=""
+PROXY_PID=""
+
+find_proxy_dir() {
+  if [ -f "$SCRIPT_DIR/proxy/proxy.js" ]; then
+    CLAUDEV_PROXY_DIR="$SCRIPT_DIR/proxy"
+    return 0
+  fi
+  if [ -f "$CLAUDEV_HOME/proxy/proxy.js" ]; then
+    CLAUDEV_PROXY_DIR="$CLAUDEV_HOME/proxy"
+    return 0
+  fi
+  return 1
+}
+
+start_proxy() {
+  [ "${CLAUDEV_NO_PROXY:-}" = 1 ] && return 0
+  command -v node >/dev/null 2>&1 || return 0
+  find_proxy_dir || return 0
+
+  node "$CLAUDEV_PROXY_DIR/gen-ca.js" || return 0
+
+  proxy_ready=$(mktemp)
+  rm -f "$proxy_ready"
+  CLAUDEV_SESSION_ID=$$ node "$CLAUDEV_PROXY_DIR/proxy.js" "$proxy_ready" &
+  PROXY_PID=$!
+
+  i=0
+  while [ $i -lt 50 ] && [ ! -f "$proxy_ready" ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+
+  if [ ! -f "$proxy_ready" ]; then
+    kill "$PROXY_PID" 2>/dev/null || true
+    PROXY_PID=""
+    rm -f "$proxy_ready"
+    return 0
+  fi
+
+  PROXY_PORT=$(cat "$proxy_ready")
+  rm -f "$proxy_ready"
+  export HTTPS_PROXY="http://127.0.0.1:$PROXY_PORT"
+  export NODE_EXTRA_CA_CERTS="$CLAUDEV_HOME/proxy-ca/ca.pem"
+}
+
+stop_proxy() {
+  [ -n "$PROXY_PID" ] || return 0
+  kill "$PROXY_PID" 2>/dev/null || true
+  wait "$PROXY_PID" 2>/dev/null || true
+  PROXY_PID=""
+}
+
+sweep_orphan_jsonl() {
+  usage_dir="$CLAUDEV_HOME/usage"
+  [ -d "$usage_dir" ] || return 0
+  count=0
+  for f in "$usage_dir"/session-*.jsonl; do
+    [ -f "$f" ] || continue
+    opid=$(echo "$f" | sed 's/.*session-\([0-9A-Za-z_-]*\)\.jsonl/\1/')
+    case "$opid" in
+      *[!0-9]*) continue ;;
+    esac
+    kill -0 "$opid" 2>/dev/null || count=$((count + 1))
+  done
+  [ "$count" -gt 0 ] && printf "claudev: %d orphaned usage file(s) pending shipment\n" "$count" >&2
+  return 0
+}
+
 # --- main pipeline ---
 
 main() {
@@ -528,7 +599,21 @@ main() {
     fetch_key || rc=$?
   fi
   [ "$rc" = 0 ] || exit "$rc"
-  exec env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@"
+  sweep_orphan_jsonl
+  start_proxy
+
+  trap stop_proxy EXIT
+
+  env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@" &
+  CLAUDE_PID=$!
+
+  trap 'kill -s INT "$CLAUDE_PID" 2>/dev/null; stop_proxy' INT
+  trap 'kill -s TERM "$CLAUDE_PID" 2>/dev/null; stop_proxy' TERM
+
+  wait "$CLAUDE_PID" 2>/dev/null
+  CLAUDE_RC=$?
+  CLAUDE_PID=""
+  exit "$CLAUDE_RC"
 }
 
 dispatch "$@"
