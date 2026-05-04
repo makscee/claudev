@@ -144,6 +144,104 @@ describe('postBatch', () => {
   });
 });
 
+describe('offset sidecar', () => {
+  it('resumes from offset after partial failure', async () => {
+    let callCount = 0;
+    let failOnCall = 2;
+    const { server, port, url } = await startMockServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => body += c);
+      req.on('end', () => {
+        callCount++;
+        if (callCount === failOnCall) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Internal Server Error');
+        } else {
+          const parsed = JSON.parse(body);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ inserted: parsed.events.length, skipped: 0 }));
+        }
+      });
+    });
+
+    const tmp = makeTmpDir();
+    const tokenPath = join(tmp, 'token');
+    const jsonlPath = join(tmp, 'session-99999.jsonl');
+    writeFileSync(tokenPath, 'my-token\n');
+
+    // Create 2500 events → 3 batches of 1000, 1000, 500
+    const lines = Array.from({ length: 2500 }, (_, i) =>
+      JSON.stringify({ ts: `2026-01-01T00:00:${String(i).padStart(2, '0')}`, input_tokens: i })
+    ).join('\n') + '\n';
+    writeFileSync(jsonlPath, lines);
+
+    delete require.cache[require.resolve('../ship-usage.js')];
+    process.env.CLAUDEV_USAGE_API = url;
+    process.env.CLAUDEV_TOKEN_PATH = tokenPath;
+    const mod = require('../ship-usage.js');
+
+    // First attempt: batch 1 succeeds (offset=1000), batch 2 fails (500)
+    await assert.rejects(() => mod.shipFile(jsonlPath), /HTTP 500/);
+
+    // File should still exist
+    assert.equal(existsSync(jsonlPath), true);
+    // Offset sidecar should record 1000
+    const offsetContent = readFileSync(jsonlPath + '.offset', 'utf8');
+    assert.equal(offsetContent.trim(), '1000');
+
+    // Reset mock — now all succeed
+    callCount = 0;
+    failOnCall = -1;
+
+    // Second attempt: should resume from offset 1000
+    delete require.cache[require.resolve('../ship-usage.js')];
+    process.env.CLAUDEV_USAGE_API = url;
+    process.env.CLAUDEV_TOKEN_PATH = tokenPath;
+    const mod2 = require('../ship-usage.js');
+
+    const result = await mod2.shipFile(jsonlPath);
+    assert.equal(result.shipped, 2500);
+    assert.equal(existsSync(jsonlPath), false);
+    assert.equal(existsSync(jsonlPath + '.offset'), false);
+
+    await stopServer(server);
+    delete process.env.CLAUDEV_USAGE_API;
+    delete process.env.CLAUDEV_TOKEN_PATH;
+  });
+
+  it('cleans up offset sidecar on full success', async () => {
+    const { server, port, url } = await startMockServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => body += c);
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ inserted: 1, skipped: 0 }));
+      });
+    });
+
+    const tmp = makeTmpDir();
+    const tokenPath = join(tmp, 'token');
+    const jsonlPath = join(tmp, 'session-99999.jsonl');
+    writeFileSync(tokenPath, 'my-token\n');
+    writeFileSync(jsonlPath, '{"ts":"2026-01-01","input_tokens":1}\n');
+    // Pre-existing stale offset
+    writeFileSync(jsonlPath + '.offset', '0');
+
+    delete require.cache[require.resolve('../ship-usage.js')];
+    process.env.CLAUDEV_USAGE_API = url;
+    process.env.CLAUDEV_TOKEN_PATH = tokenPath;
+    const { shipFile } = require('../ship-usage.js');
+
+    await shipFile(jsonlPath);
+    assert.equal(existsSync(jsonlPath), false);
+    assert.equal(existsSync(jsonlPath + '.offset'), false);
+
+    await stopServer(server);
+    delete process.env.CLAUDEV_USAGE_API;
+    delete process.env.CLAUDEV_TOKEN_PATH;
+  });
+});
+
 describe('shipFile', () => {
   it('ships events and deletes file on success', async () => {
     let batches = [];

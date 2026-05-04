@@ -69,12 +69,29 @@ function postBatch(token, events) {
   });
 }
 
+function readOffset(filePath) {
+  try {
+    return parseInt(fs.readFileSync(filePath + '.offset', 'utf8').trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeOffset(filePath, offset) {
+  fs.writeFileSync(filePath + '.offset', String(offset));
+}
+
+function deleteOffset(filePath) {
+  try { fs.unlinkSync(filePath + '.offset'); } catch {}
+}
+
 async function shipFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
   const allEvents = parseJsonl(content);
 
   if (allEvents.length === 0) {
     fs.unlinkSync(filePath);
+    deleteOffset(filePath);
     return { shipped: 0 };
   }
 
@@ -87,17 +104,32 @@ async function shipFile(filePath) {
     throw e;
   }
 
-  const batches = chunkEvents(allEvents, BATCH_SIZE);
-  let shipped = 0;
+  const offset = readOffset(filePath);
+  const events = allEvents.slice(offset);
+
+  if (events.length === 0) {
+    fs.unlinkSync(filePath);
+    deleteOffset(filePath);
+    return { shipped: allEvents.length };
+  }
+
+  const batches = chunkEvents(events, BATCH_SIZE);
+  let shipped = offset;
 
   for (const batch of batches) {
     await postBatch(token, batch);
     shipped += batch.length;
+    writeOffset(filePath, shipped);
   }
 
   fs.unlinkSync(filePath);
+  deleteOffset(filePath);
   process.stderr.write(`ship-usage: shipped ${shipped} events\n`);
   return { shipped };
 }
 
-module.exports = { parseJsonl, chunkEvents, postBatch, shipFile, BATCH_SIZE, SWEEP_CAP, STALE_MTIME_MS };
+module.exports = {
+  parseJsonl, chunkEvents, postBatch, shipFile,
+  readOffset, writeOffset, deleteOffset,
+  BATCH_SIZE, SWEEP_CAP, STALE_MTIME_MS,
+};
