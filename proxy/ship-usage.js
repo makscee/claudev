@@ -36,4 +36,68 @@ function chunkEvents(events, size) {
   return chunks;
 }
 
-module.exports = { parseJsonl, chunkEvents, BATCH_SIZE, SWEEP_CAP, STALE_MTIME_MS };
+function postBatch(token, events) {
+  const url = new URL(API_URL);
+  const httpModule = url.protocol === 'https:' ? require('https') : require('http');
+  const body = JSON.stringify({ events });
+
+  return new Promise((resolve, reject) => {
+    const req = httpModule.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          resolve(JSON.parse(data));
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function shipFile(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const allEvents = parseJsonl(content);
+
+  if (allEvents.length === 0) {
+    fs.unlinkSync(filePath);
+    return { shipped: 0 };
+  }
+
+  let token;
+  try {
+    token = fs.readFileSync(TOKEN_PATH, 'utf8').trim();
+  } catch (e) {
+    process.stderr.write(`ship-usage: token file missing: ${e.message}\n`);
+    process.exitCode = 1;
+    throw e;
+  }
+
+  const batches = chunkEvents(allEvents, BATCH_SIZE);
+  let shipped = 0;
+
+  for (const batch of batches) {
+    await postBatch(token, batch);
+    shipped += batch.length;
+  }
+
+  fs.unlinkSync(filePath);
+  process.stderr.write(`ship-usage: shipped ${shipped} events\n`);
+  return { shipped };
+}
+
+module.exports = { parseJsonl, chunkEvents, postBatch, shipFile, BATCH_SIZE, SWEEP_CAP, STALE_MTIME_MS };
