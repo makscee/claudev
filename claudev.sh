@@ -607,8 +607,8 @@ main() {
   env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@" &
   CLAUDE_PID=$!
 
-  trap 'kill -s INT "$CLAUDE_PID" 2>/dev/null' INT
-  trap 'kill -s TERM "$CLAUDE_PID" 2>/dev/null' TERM
+  trap 'kill -s INT "$CLAUDE_PID" 2>/dev/null; stop_proxy' INT
+  trap 'kill -s TERM "$CLAUDE_PID" 2>/dev/null; stop_proxy' TERM
 
   wait "$CLAUDE_PID" 2>/dev/null
   CLAUDE_RC=$?

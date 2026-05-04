@@ -56,7 +56,7 @@ function createServerCert(caCertPem, caKeyPem, hostname) {
     const extPath = join(tmp, 'ext.cnf');
 
     writeFileSync(caCertPath, caCertPem);
-    writeFileSync(caKeyPath, caKeyPem);
+    writeFileSync(caKeyPath, caKeyPem, { mode: 0o600 });
 
     // Write extensions config for SAN
     writeFileSync(extPath, [
