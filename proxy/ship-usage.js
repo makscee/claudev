@@ -57,7 +57,11 @@ function postBatch(token, events) {
       res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
         if (res.statusCode === 200) {
-          resolve(JSON.parse(data));
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error(`Invalid JSON in 200 response: ${data.slice(0, 200)}`));
+          }
         } else {
           reject(new Error(`HTTP ${res.statusCode}: ${data}`));
         }
