@@ -41,7 +41,6 @@ const server = http.createServer((req, res) => {
 server.on('connect', (req, clientSocket, head) => {
   const [host, portStr] = req.url.split(':');
   const port = parseInt(portStr || '443', 10);
-
   if (host === INTERCEPT_HOST) {
     handleMitm(clientSocket, head, host, port);
   } else {
@@ -68,11 +67,12 @@ function handleMitm(clientSocket, head, host, port) {
     isServer: true,
     cert: serverCert.cert,
     key: serverCert.key,
+    ALPNProtocols: ['http/1.1'],
   });
 
-  if (head.length > 0) {
-    tlsServer.once('secure', () => tlsServer.unshift(head));
-  }
+  tlsServer.once('secure', () => {
+    if (head.length > 0) tlsServer.unshift(head);
+  });
 
   // Buffer the full HTTP request from client
   let requestData = Buffer.alloc(0);
@@ -109,7 +109,6 @@ function handleMitm(clientSocket, head, host, port) {
         }
       }
 
-      // Store path for later
       tlsServer._requestPath = requestPath;
     }
 
@@ -138,7 +137,7 @@ function handleMitm(clientSocket, head, host, port) {
     }
   });
 
-  tlsServer.on('error', () => clientSocket.destroy());
+  tlsServer.on('error', () => { clientSocket.destroy(); });
 }
 
 function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint, model) {
@@ -148,61 +147,77 @@ function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint
     servername: INTERCEPT_HOST,
     rejectUnauthorized: process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0',
   }, () => {
-    upstream.write(requestData);
-  });
-
-  // Buffer upstream response to extract usage
-  let responseData = Buffer.alloc(0);
-  const isMessagesEndpoint = requestPath === '/v1/messages';
-
-  upstream.on('data', (chunk) => {
-    responseData = Buffer.concat([responseData, chunk]);
-    tlsClient.write(chunk);
-  });
-
-  upstream.on('end', () => {
-    tlsClient.end();
-
     if (isMessagesEndpoint) {
-      parseAndWriteUsage(responseData.toString(), tokenFingerprint, model);
+      const headerEnd = requestData.indexOf('\r\n\r\n');
+      const headers = requestData.slice(0, headerEnd).toString().replace(/\r\nAccept-Encoding:[^\r\n]*/i, '');
+      upstream.write(Buffer.concat([Buffer.from(headers), requestData.slice(headerEnd)]));
+    } else {
+      upstream.write(requestData);
     }
   });
 
-  upstream.on('error', () => tlsClient.destroy());
-  tlsClient.on('error', () => upstream.destroy());
-}
-
-function parseAndWriteUsage(responseStr, tokenFingerprint, model) {
+  const isMessagesEndpoint = /\/(v1\/messages|api\/chat|api\/claude_code\/chat|messages)/.test(requestPath);
+  let headersDone = false;
+  let responseBuf = '';
+  let sseLineBuf = '';
   let inputTokens = 0;
   let outputTokens = 0;
   let cacheCreationTokens = 0;
   let cacheReadTokens = 0;
+  let usageFound = false;
 
-  // Extract body from HTTP response (after headers)
-  const bodyStart = responseStr.indexOf('\r\n\r\n');
-  const body = bodyStart !== -1 ? responseStr.slice(bodyStart + 4) : responseStr;
+  upstream.on('data', (chunk) => {
+    tlsClient.write(chunk);
+    if (!isMessagesEndpoint) return;
 
-  // Parse SSE lines
-  const lines = body.split('\n');
-  for (const line of lines) {
-    if (!line.startsWith('data: ')) continue;
-    const dataStr = line.slice(6);
-    try {
-      const data = JSON.parse(dataStr);
-      if (data.type === 'message_start' && data.message && data.message.usage) {
-        const u = data.message.usage;
-        inputTokens = u.input_tokens || 0;
-        cacheCreationTokens = u.cache_creation_input_tokens || 0;
-        cacheReadTokens = u.cache_read_input_tokens || 0;
-      }
-      if (data.type === 'message_delta' && data.usage) {
-        outputTokens = data.usage.output_tokens || 0;
-      }
-    } catch (e) {
-      // skip unparseable lines
+    if (!headersDone) {
+      responseBuf += chunk.toString();
+      const idx = responseBuf.indexOf('\r\n\r\n');
+      if (idx === -1) return;
+      headersDone = true;
+      sseLineBuf = responseBuf.slice(idx + 4);
+      responseBuf = '';
+    } else {
+      sseLineBuf += chunk.toString();
     }
-  }
 
+    const lines = sseLineBuf.split('\n');
+    sseLineBuf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const dataStr = line.slice(6).trim();
+      if (dataStr === '[DONE]') {
+        if (usageFound) writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
+        usageFound = false;
+        continue;
+      }
+      try {
+        const data = JSON.parse(dataStr);
+        if (data.type === 'message_start' && data.message && data.message.usage) {
+          const u = data.message.usage;
+          inputTokens = u.input_tokens || 0;
+          cacheCreationTokens = u.cache_creation_input_tokens || 0;
+          cacheReadTokens = u.cache_read_input_tokens || 0;
+          usageFound = true;
+        }
+        if (data.type === 'message_delta' && data.usage) {
+          outputTokens = data.usage.output_tokens || 0;
+          usageFound = true;
+        }
+        if (data.type === 'message_stop' && usageFound) {
+          writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
+          usageFound = false;
+        }
+      } catch (e) {}
+    }
+  });
+
+  upstream.on('end', () => tlsClient.end());
+  upstream.on('error', () => { tlsClient.destroy(); });
+  tlsClient.on('error', () => { upstream.destroy(); });
+}
+
+function writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens) {
   const row = JSON.stringify({
     ts: new Date().toISOString(),
     session_id: SESSION_ID,
@@ -213,7 +228,6 @@ function parseAndWriteUsage(responseStr, tokenFingerprint, model) {
     cache_creation_tokens: cacheCreationTokens,
     cache_read_tokens: cacheReadTokens,
   });
-
   const filePath = join(usageDir, `session-${SESSION_ID}.jsonl`);
   appendFileSync(filePath, row + '\n');
 }
