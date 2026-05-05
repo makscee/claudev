@@ -162,7 +162,7 @@ send_request() {
       ['output_tokens', row.output_tokens === 20],
       ['cache_creation_tokens', row.cache_creation_tokens === 5],
       ['cache_read_tokens', row.cache_read_tokens === 3],
-      ['token_fingerprint exists', typeof row.token_fingerprint === 'string' && row.token_fingerprint.length === 12],
+      ['token_fingerprint exists', typeof row.token_fingerprint === 'string' && row.token_fingerprint.length === 64],
       ['ts exists', typeof row.ts === 'string' && row.ts.length > 0],
     ];
     let ok = true;

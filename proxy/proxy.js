@@ -102,7 +102,7 @@ function handleMitm(clientSocket, head, host, port) {
         const lower = line.toLowerCase();
         if (lower.startsWith('authorization:')) {
           const val = line.slice('authorization:'.length).trim();
-          tokenFingerprint = crypto.createHash('sha256').update(val).digest('hex').slice(0, 12);
+          tokenFingerprint = crypto.createHash('sha256').update(val).digest('hex');
         }
         if (lower.startsWith('content-length:')) {
           contentLength = parseInt(line.slice('content-length:'.length).trim(), 10);
