@@ -53,7 +53,7 @@ mv -f "$tmp" "$BIN_DIR/claudev"
 trap - EXIT
 
 mkdir -p "$PROXY_DIR"
-for f in gen-ca.js proxy.js ship-usage.js; do
+for f in gen-ca.js proxy.js ship-usage.js cert.js; do
   echo "claudev: downloading proxy/$f from $CLAUDEV_AUTH_HOST" >&2
   proxy_tmp=$(mktemp)
   trap 'rm -f "$proxy_tmp"' EXIT

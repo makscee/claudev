@@ -9,6 +9,7 @@ setup() {
   printf '// gen-ca\n' > "$FIXTURE_DIR/claudev/proxy/gen-ca.js"
   printf '// proxy\n'  > "$FIXTURE_DIR/claudev/proxy/proxy.js"
   printf '// ship\n'   > "$FIXTURE_DIR/claudev/proxy/ship-usage.js"
+  printf '// cert\n'   > "$FIXTURE_DIR/claudev/proxy/cert.js"
   printf '// claudev.sh\n' > "$FIXTURE_DIR/claudev/claudev.sh"
 
   # Compute hashes for manifest
@@ -17,13 +18,15 @@ setup() {
   ca_sha=$(sha_for "$FIXTURE_DIR/claudev/proxy/gen-ca.js")
   px_sha=$(sha_for "$FIXTURE_DIR/claudev/proxy/proxy.js")
   sh2_sha=$(sha_for "$FIXTURE_DIR/claudev/proxy/ship-usage.js")
+  ct_sha=$(sha_for "$FIXTURE_DIR/claudev/proxy/cert.js")
 
   cat > "$FIXTURE_DIR/claudev/version.json" <<EOF
 {
   "sha256_sh": "$sh_sha",
   "sha256_proxy_gen_ca": "$ca_sha",
   "sha256_proxy_proxy": "$px_sha",
-  "sha256_proxy_ship_usage": "$sh2_sha"
+  "sha256_proxy_ship_usage": "$sh2_sha",
+  "sha256_proxy_cert": "$ct_sha"
 }
 EOF
 
@@ -71,9 +74,11 @@ teardown() {
   [ -f "$FAKE_HOME/.local/lib/claudev/proxy/gen-ca.js" ]
   [ -f "$FAKE_HOME/.local/lib/claudev/proxy/proxy.js" ]
   [ -f "$FAKE_HOME/.local/lib/claudev/proxy/ship-usage.js" ]
+  [ -f "$FAKE_HOME/.local/lib/claudev/proxy/cert.js" ]
   grep -q '// gen-ca' "$FAKE_HOME/.local/lib/claudev/proxy/gen-ca.js"
   grep -q '// proxy'  "$FAKE_HOME/.local/lib/claudev/proxy/proxy.js"
   grep -q '// ship'   "$FAKE_HOME/.local/lib/claudev/proxy/ship-usage.js"
+  grep -q '// cert'   "$FAKE_HOME/.local/lib/claudev/proxy/cert.js"
 }
 
 @test "install.sh aborts on sha256 mismatch for proxy file" {

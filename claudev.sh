@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.7"
+CLAUDEV_VERSION="0.2.8"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -406,15 +406,39 @@ dispatch() {
   return 0  # no subcommand matched → fall through to main
 }
 
+# bootstrap_proxy_bundle <stage_dir> <manifest>
+# Fetches the 4 proxy js files into <stage_dir>/proxy/ and verifies each against
+# sha256_proxy_<key> in <manifest>. Returns 0 on full success, 1 on any failure
+# (missing key, fetch error, sha mismatch). Caller is responsible for mv-into-place.
+bootstrap_proxy_bundle() {
+  bpb_stage="$1"
+  bpb_manifest="$2"
+  mkdir -p "$bpb_stage/proxy" || return 1
+  for bpb_f in gen-ca.js proxy.js ship-usage.js cert.js; do
+    if ! curl -fsS "$CLAUDEV_AUTH_HOST/claudev/proxy/$bpb_f" \
+              -o "$bpb_stage/proxy/$bpb_f"; then
+      echo "claudev: failed to fetch proxy/$bpb_f — aborting" >&2
+      return 1
+    fi
+    bpb_key="sha256_proxy_$(echo "$bpb_f" | sed 's/[.-]/_/g; s/_js$//')"
+    bpb_want=$(printf "%s" "$bpb_manifest" | extract_json_string "$bpb_key")
+    bpb_got=$(shasum -a 256 "$bpb_stage/proxy/$bpb_f" 2>/dev/null | awk '{print $1}')
+    [ -z "$bpb_got" ] && bpb_got=$(sha256sum "$bpb_stage/proxy/$bpb_f" | awk '{print $1}')
+    if [ -z "$bpb_want" ] || [ "$bpb_got" != "$bpb_want" ]; then
+      echo "claudev: sha256 mismatch for proxy/$bpb_f (got $bpb_got, want $bpb_want) — refusing update" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 # shellcheck disable=SC2120 # $@ used only on the exec path; callers pass none
 self_update() {
-  # Honor CLAUDEV_FORCE_UPDATE=1 OR cache-miss (24h since last check OR never).
+  # Honor CLAUDEV_FORCE_UPDATE=1 OR cache-miss (1h since last check).
   now=$(date +%s)
   last=$(config_get last_update_check)
   : "${last:=0}"
   cache_age=$(( now - last ))
-  # 1h cache (was 24h) — picks up new versions during active iteration without
-  # forcing a fetch on every invocation. Manual override: CLAUDEV_FORCE_UPDATE=1.
   if [ "${CLAUDEV_FORCE_UPDATE:-0}" != 1 ] && [ "$cache_age" -lt 3600 ]; then
     return 0
   fi
@@ -430,24 +454,50 @@ self_update() {
   # shellcheck disable=SC2059
   printf "${L_UPDATE_AVAILABLE}, " "$CLAUDEV_VERSION" "$remote_version"
   printf "%s" "$L_UPDATE_INSTALL_PROMPT"
-  if [ ! -t 0 ]; then echo "(non-interactive — skipping)"; return 0; fi
-  read -r ans
-  case "$ans" in
-    n|N|no|No|NO) return 0 ;;
-  esac
-  tmp=$(mktemp)
-  curl -fsS "$CLAUDEV_AUTH_HOST/claudev/claudev.sh" -o "$tmp" || { rm -f "$tmp"; return 1; }
-  actual_sha=$(shasum -a 256 "$tmp" 2>/dev/null | awk '{print $1}')
-  [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$tmp" | awk '{print $1}')
-  if [ "$actual_sha" != "$remote_sha" ]; then
-    echo "claudev: sha256 mismatch — refusing update (got $actual_sha, want $remote_sha)" >&2
-    rm -f "$tmp"
+  if [ ! -t 0 ] && [ "${CLAUDEV_FORCE_UPDATE:-0}" != 1 ]; then echo "(non-interactive — skipping)"; return 0; fi
+  if [ -t 0 ]; then
+    read -r ans
+    case "$ans" in
+      n|N|no|No|NO) return 0 ;;
+    esac
+  fi
+
+  # Stage all 5 files into a tmpdir; only publish if all sha checks pass.
+  stage_dir=$(mktemp -d) || return 1
+  trap 'rm -rf "$stage_dir"' EXIT
+  if ! curl -fsS "$CLAUDEV_AUTH_HOST/claudev/claudev.sh" -o "$stage_dir/claudev.sh"; then
+    echo "claudev: failed to fetch claudev.sh — aborting" >&2
     return 1
   fi
-  chmod +x "$tmp"
-  mv -f "$tmp" "$0"
-  # Refresh locale bundle alongside binary so new strings (e.g. L_WELCOME)
-  # land before the re-exec sources them.
+  actual_sha=$(shasum -a 256 "$stage_dir/claudev.sh" 2>/dev/null | awk '{print $1}')
+  [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$stage_dir/claudev.sh" | awk '{print $1}')
+  if [ "$actual_sha" != "$remote_sha" ]; then
+    echo "claudev: sha256 mismatch — refusing update (got $actual_sha, want $remote_sha)" >&2
+    return 1
+  fi
+  bootstrap_proxy_bundle "$stage_dir" "$manifest" || return 1
+
+  # Verification done; staging is now publish payload. Disarm trap so partial-publish
+  # leaves staged files for postmortem instead of auto-cleaning.
+  trap - EXIT
+
+  proxy_dir="${HOME}/.local/lib/claudev/proxy"
+  mkdir -p "$proxy_dir" || {
+    echo "claudev: failed to create $proxy_dir — staged files at $stage_dir" >&2
+    return 1
+  }
+  for pf in gen-ca.js proxy.js ship-usage.js cert.js; do
+    if ! mv -f "$stage_dir/proxy/$pf" "$proxy_dir/$pf"; then
+      echo "claudev: PARTIAL PUBLISH — proxy/$pf failed to install (staged files at $stage_dir); run install.sh to recover" >&2
+      return 1
+    fi
+  done
+  chmod +x "$stage_dir/claudev.sh"
+  if ! mv -f "$stage_dir/claudev.sh" "$0"; then
+    echo "claudev: PARTIAL PUBLISH — claudev.sh failed to install (staged files at $stage_dir); run install.sh to recover" >&2
+    return 1
+  fi
+  rm -rf "$stage_dir"
   refresh_locales
   exec "$0" "$@"
 }
