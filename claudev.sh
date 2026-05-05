@@ -513,6 +513,7 @@ esac
 
 CLAUDEV_PROXY_DIR=""
 PROXY_PID=""
+PERIODIC_SHIPPER_PID=""
 
 find_proxy_dir() {
   if [ -f "$SCRIPT_DIR/proxy/proxy.js" ]; then
@@ -538,6 +539,17 @@ start_proxy() {
   CLAUDEV_SESSION_ID=$$ node "$CLAUDEV_PROXY_DIR/proxy.js" "$proxy_ready" &
   PROXY_PID=$!
 
+  # Periodic shipper: every SHIP_INTERVAL seconds (default 900), ship pending usage
+  # events from the active session file. Calls are best-effort; ship-usage.js handles
+  # offset-based partial-batch resume so concurrent reads on the active file are safe.
+  session_file="$CLAUDEV_HOME/usage/session-$$.jsonl"
+  (
+    while sleep "${SHIP_INTERVAL:-900}"; do
+      [ -f "$session_file" ] && node "$CLAUDEV_PROXY_DIR/ship-usage.js" "$session_file" 2>/dev/null || true
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  PERIODIC_SHIPPER_PID=$!
+
   i=0
   while [ $i -lt 50 ] && [ ! -f "$proxy_ready" ]; do
     sleep 0.1
@@ -562,6 +574,17 @@ stop_proxy() {
   kill "$PROXY_PID" 2>/dev/null || true
   wait "$PROXY_PID" 2>/dev/null || true
   PROXY_PID=""
+  # Stop periodic shipper: kill subshell, wait for it (and any in-flight node ship)
+  # to fully exit. Guarantees the final ship below never races against a periodic
+  # ship on the same offset file.
+  if [ -n "$PERIODIC_SHIPPER_PID" ]; then
+    # Kill subshell's children first (the sleep) so the subshell can return from wait;
+    # then signal the subshell itself; then reap.
+    pkill -P "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
+    kill "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
+    wait "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
+    PERIODIC_SHIPPER_PID=""
+  fi
   # Ship usage data (5s timeout, silent failure — orphan sweep catches it)
   if [ -f "$CLAUDEV_HOME/usage/session-$$.jsonl" ] && command -v node >/dev/null 2>&1; then
     if command -v timeout >/dev/null 2>&1; then

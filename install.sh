@@ -19,7 +19,14 @@ set -eu
 
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 BIN_DIR="${HOME}/.local/bin"
+PROXY_DIR="${HOME}/.local/lib/claudev/proxy"
 SHARE_DIR="${HOME}/.local/share/claudev"
+
+# Extract a sha256_<key> field from version.json (best-effort, single line awk).
+extract_sha() {
+  printf "%s" "$1" | awk -F\" -v key="$2" '
+    { for (i=1;i<=NF;i++) if ($i==key) { print $(i+2); exit } }'
+}
 
 mkdir -p "$BIN_DIR" "$SHARE_DIR/locales"
 
@@ -32,7 +39,7 @@ curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/claudev.sh" -o "$tmp"
 if [ "${CLAUDEV_INSTALL_SKIP_VERIFY:-0}" != 1 ]; then
   echo "claudev: verifying sha256" >&2
   manifest=$(curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/version.json")
-  expected_sha=$(printf "%s" "$manifest" | awk -F\" '/sha256_sh/{ for (i=1;i<=NF;i++) if ($i=="sha256_sh") { print $(i+2); exit } }')
+  expected_sha=$(extract_sha "$manifest" sha256_sh)
   actual_sha=$(shasum -a 256 "$tmp" 2>/dev/null | awk '{print $1}')
   [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$tmp" | awk '{print $1}')
   if [ -z "$expected_sha" ] || [ "$actual_sha" != "$expected_sha" ]; then
@@ -44,6 +51,30 @@ fi
 chmod +x "$tmp"
 mv -f "$tmp" "$BIN_DIR/claudev"
 trap - EXIT
+
+mkdir -p "$PROXY_DIR"
+for f in gen-ca.js proxy.js ship-usage.js; do
+  echo "claudev: downloading proxy/$f from $CLAUDEV_AUTH_HOST" >&2
+  proxy_tmp=$(mktemp)
+  trap 'rm -f "$proxy_tmp"' EXIT
+  curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/proxy/$f" -o "$proxy_tmp"
+
+  if [ "${CLAUDEV_INSTALL_SKIP_VERIFY:-0}" != 1 ]; then
+    # Manifest key: sha256_proxy_<basename-with-_-not-->
+    key=$(printf "sha256_proxy_%s" "$f" | sed 's/[.-]/_/g; s/_js$//')
+    expected_sha=$(extract_sha "$manifest" "$key")
+    actual_sha=$(shasum -a 256 "$proxy_tmp" 2>/dev/null | awk '{print $1}')
+    [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$proxy_tmp" | awk '{print $1}')
+    if [ -z "$expected_sha" ] || [ "$actual_sha" != "$expected_sha" ]; then
+      echo "claudev: sha256 mismatch for proxy/$f (got $actual_sha, want $expected_sha) — aborting" >&2
+      exit 1
+    fi
+  fi
+
+  mv "$proxy_tmp" "$PROXY_DIR/$f"
+  chmod 644 "$PROXY_DIR/$f"
+  trap - EXIT
+done
 
 # Locale files (best-effort — runtime falls back to en if missing).
 for lang in en ru; do
