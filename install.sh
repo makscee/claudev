@@ -56,6 +56,7 @@ mkdir -p "$PROXY_DIR"
 for f in gen-ca.js proxy.js ship-usage.js; do
   echo "claudev: downloading proxy/$f from $CLAUDEV_AUTH_HOST" >&2
   proxy_tmp=$(mktemp)
+  trap 'rm -f "$proxy_tmp"' EXIT
   curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/proxy/$f" -o "$proxy_tmp"
 
   if [ "${CLAUDEV_INSTALL_SKIP_VERIFY:-0}" != 1 ]; then
@@ -66,13 +67,13 @@ for f in gen-ca.js proxy.js ship-usage.js; do
     [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$proxy_tmp" | awk '{print $1}')
     if [ -z "$expected_sha" ] || [ "$actual_sha" != "$expected_sha" ]; then
       echo "claudev: sha256 mismatch for proxy/$f (got $actual_sha, want $expected_sha) — aborting" >&2
-      rm -f "$proxy_tmp"
       exit 1
     fi
   fi
 
   mv "$proxy_tmp" "$PROXY_DIR/$f"
   chmod 644 "$PROXY_DIR/$f"
+  trap - EXIT
 done
 
 # Locale files (best-effort — runtime falls back to en if missing).
