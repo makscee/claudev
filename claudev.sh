@@ -488,13 +488,13 @@ self_update() {
   }
   for pf in gen-ca.js proxy.js ship-usage.js cert.js; do
     if ! mv -f "$stage_dir/proxy/$pf" "$proxy_dir/$pf"; then
-      echo "claudev: PARTIAL PUBLISH — proxy/$pf failed to install; run install.sh to recover" >&2
+      echo "claudev: PARTIAL PUBLISH — proxy/$pf failed to install (staged files at $stage_dir); run install.sh to recover" >&2
       return 1
     fi
   done
   chmod +x "$stage_dir/claudev.sh"
   if ! mv -f "$stage_dir/claudev.sh" "$0"; then
-    echo "claudev: PARTIAL PUBLISH — claudev.sh failed to install; run install.sh to recover" >&2
+    echo "claudev: PARTIAL PUBLISH — claudev.sh failed to install (staged files at $stage_dir); run install.sh to recover" >&2
     return 1
   fi
   rm -rf "$stage_dir"
