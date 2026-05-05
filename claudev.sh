@@ -574,6 +574,14 @@ stop_proxy() {
   kill "$PROXY_PID" 2>/dev/null || true
   wait "$PROXY_PID" 2>/dev/null || true
   PROXY_PID=""
+  # Stop periodic shipper: kill subshell, wait for it (and any in-flight node ship)
+  # to fully exit. Guarantees the final ship below never races against a periodic
+  # ship on the same offset file.
+  if [ -n "$PERIODIC_SHIPPER_PID" ]; then
+    kill "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
+    wait "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
+    PERIODIC_SHIPPER_PID=""
+  fi
   # Ship usage data (5s timeout, silent failure — orphan sweep catches it)
   if [ -f "$CLAUDEV_HOME/usage/session-$$.jsonl" ] && command -v node >/dev/null 2>&1; then
     if command -v timeout >/dev/null 2>&1; then
