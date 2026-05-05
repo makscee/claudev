@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.9"
+CLAUDEV_VERSION="0.2.10"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -572,6 +572,12 @@ find_proxy_dir() {
   fi
   if [ -f "$CLAUDEV_HOME/proxy/proxy.js" ]; then
     CLAUDEV_PROXY_DIR="$CLAUDEV_HOME/proxy"
+    return 0
+  fi
+  # Default install layout: install.sh drops proxy here while wrapper lives in
+  # ~/.local/bin (different parent), so $SCRIPT_DIR/proxy never matches.
+  if [ -f "${HOME}/.local/lib/claudev/proxy/proxy.js" ]; then
+    CLAUDEV_PROXY_DIR="${HOME}/.local/lib/claudev/proxy"
     return 0
   fi
   return 1

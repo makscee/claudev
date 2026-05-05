@@ -102,7 +102,10 @@ function handleMitm(clientSocket, head, host, port) {
         const lower = line.toLowerCase();
         if (lower.startsWith('authorization:')) {
           const val = line.slice('authorization:'.length).trim();
-          tokenFingerprint = crypto.createHash('sha256').update(val).digest('hex');
+          // void-keys stores sha256(rawToken); strip the "Bearer " scheme so
+          // fingerprints round-trip across proxy ingest and key registration.
+          const raw = val.replace(/^Bearer\s+/i, '');
+          tokenFingerprint = crypto.createHash('sha256').update(raw).digest('hex');
         }
         if (lower.startsWith('content-length:')) {
           contentLength = parseInt(line.slice('content-length:'.length).trim(), 10);
