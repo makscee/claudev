@@ -64,6 +64,53 @@ STUB
   [ "$status" -eq 42 ]
 }
 
+@test "periodic shipper: fires during session, reaped on exit" {
+  mock_keys_200
+
+  ship_marker="$HOME/.claudev/ship-marker"
+  real_node="$(command -v node)"
+
+  # Stub node: intercept ship-usage.js calls (record tick), delegate everything else
+  # to the real node so proxy.js and gen-ca.js work normally.
+  cat > "$HOME/bin/node" <<STUB
+#!/bin/sh
+case "\$*" in
+  *ship-usage.js*)
+    printf 'tick\n' >> "$ship_marker"
+    exit 0
+    ;;
+  *)
+    exec "$real_node" "\$@"
+    ;;
+esac
+STUB
+  chmod +x "$HOME/bin/node"
+
+  # claude stub: create session file (so shipper's [ -f ] guard passes),
+  # then sleep long enough for >=2 SHIP_INTERVAL=1 ticks (t=1s, t=2s).
+  # $PPID inside the stub = claudev.sh's PID = the $$ used in session_file path.
+  cat > "$HOME/bin/claude" <<'STUB'
+#!/bin/sh
+mkdir -p "$HOME/.claudev/usage"
+printf '{"event":"stub"}\n' > "$HOME/.claudev/usage/session-$PPID.jsonl"
+sleep 3
+STUB
+  chmod +x "$HOME/bin/claude"
+
+  run sh -c "PATH=$HOME/bin:\$PATH SHIP_INTERVAL=1 \
+    CLAUDEV_KEYS_HOST=http://127.0.0.1:$MOCK_PORT \
+    $CLAUDEV --print hello"
+  [ "$status" -eq 0 ]
+
+  # Assert >=2 periodic ticks fired
+  [ -f "$ship_marker" ]
+  ticks=$(wc -l < "$ship_marker" | tr -d ' ')
+  [ "$ticks" -ge 2 ]
+
+  # Assert no ship-usage.js node process survives (shipper reaped)
+  ! pgrep -f "ship-usage.js" >/dev/null 2>&1
+}
+
 @test "orphan sweep counts dead-PID JSONL files" {
   mock_keys_200
   mkdir -p "$HOME/.claudev/usage"
