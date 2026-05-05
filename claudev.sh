@@ -513,6 +513,7 @@ esac
 
 CLAUDEV_PROXY_DIR=""
 PROXY_PID=""
+PERIODIC_SHIPPER_PID=""
 
 find_proxy_dir() {
   if [ -f "$SCRIPT_DIR/proxy/proxy.js" ]; then
@@ -537,6 +538,17 @@ start_proxy() {
   rm -f "$proxy_ready"
   CLAUDEV_SESSION_ID=$$ node "$CLAUDEV_PROXY_DIR/proxy.js" "$proxy_ready" &
   PROXY_PID=$!
+
+  # Periodic shipper: every SHIP_INTERVAL seconds (default 900), ship pending usage
+  # events from the active session file. Calls are best-effort; ship-usage.js handles
+  # offset-based partial-batch resume so concurrent reads on the active file are safe.
+  session_file="$CLAUDEV_HOME/usage/session-$$.jsonl"
+  (
+    while sleep "${SHIP_INTERVAL:-900}"; do
+      [ -f "$session_file" ] && node "$CLAUDEV_PROXY_DIR/ship-usage.js" "$session_file" 2>/dev/null || true
+    done
+  ) &
+  PERIODIC_SHIPPER_PID=$!
 
   i=0
   while [ $i -lt 50 ] && [ ! -f "$proxy_ready" ]; do
