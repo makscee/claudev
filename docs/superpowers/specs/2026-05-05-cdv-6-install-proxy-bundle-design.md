@@ -41,8 +41,6 @@ Each file: `curl -fsS <url> -o <dest>` then sha256 check against a hardcoded exp
 
 **Prerequisite:** proxy files must be deployed to `auth.makscee.ru` before install.sh can fetch them. This is a server-side deploy step outside install.sh itself.
 
-**Maintenance:** sha256 hashes in install.sh must be updated whenever proxy files change. This is the same burden as the existing claudev.sh hash — accepted pattern.
-
 **Test hook:** install.sh reads `CLAUDEV_INSTALL_BASE_URL` (default: `https://auth.makscee.ru`) for the fetch base. Tests point this at a `python3 -m http.server` rooted on a fixture dir.
 
 `claudev.sh` already resolves proxy files relative to its install location — no path changes needed there.
@@ -74,11 +72,7 @@ wait "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
 
 Added before the existing final `ship-usage.js` call. Order: kill loop → wait for loop exit → final ship → kill proxy.
 
-**Race avoidance:** `wait` blocks until the subshell exits, including any in-flight `node ship-usage.js` invocation. This guarantees periodic ship and final ship never run concurrently against the same offset file. CDV-5's offset writes are append-then-rename (already crash-safe), so a mid-node SIGTERM cannot corrupt offset state.
-
-### 3. Startup Sweep
-
-No change. `sweep_orphan_jsonl` on startup (CDV-5) handles prior crashed sessions.
+**Race avoidance:** `wait` blocks until the subshell exits, including any in-flight `node ship-usage.js` invocation. This guarantees periodic ship and final ship never run concurrently against the same offset file.
 
 ---
 
@@ -119,12 +113,6 @@ Extend `test/proxy-lifecycle.bats`:
 
 - `install.sh` test: add `CLAUDEV_INSTALL_BASE_URL` env override in install.sh; bats test starts `python3 -m http.server` on a temp fixture dir, points install.sh at it via env, verifies all three proxy files land at correct paths with correct content
 - Periodic shipper test: set `SHIP_INTERVAL=1` env override; verify ship-usage.js called at least once during a short session; verify PERIODIC_SHIPPER_PID killed and reaped on stop_proxy
-
----
-
-## Windows Compatibility
-
-The periodic shipper lives inside claudev.sh session — no OS scheduler involved. `claudev-windows-support` milestone handles native Windows scheduling separately. CDV-6 makes no cross-platform compromises.
 
 ---
 
