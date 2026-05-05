@@ -1,8 +1,8 @@
 #!/bin/sh
 # sync-bundle.sh — atomic publish of claudev bundle to a target dir.
 #
-# Stages 6 files to a tmpdir, recomputes sha256 of the 4 hashed files
-# (claudev.sh + 3 proxy js) and verifies them against the staged
+# Stages 7 files to a tmpdir, recomputes sha256 of the 5 hashed files
+# (claudev.sh + 4 proxy js) and verifies them against the staged
 # version.json. Only on full match does it `mv` files into the target tree.
 #
 # Usage: sync-bundle.sh <target-dir>
@@ -32,13 +32,14 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/proxy"
 cp install.sh claudev.sh version.json "$TMP/"
-cp proxy/gen-ca.js proxy/proxy.js proxy/ship-usage.js "$TMP/proxy/"
+cp proxy/gen-ca.js proxy/proxy.js proxy/ship-usage.js proxy/cert.js "$TMP/proxy/"
 
 # Verify staged hashes against staged manifest before publishing.
 for pair in "claudev.sh:sha256_sh" \
             "proxy/gen-ca.js:sha256_proxy_gen_ca" \
             "proxy/proxy.js:sha256_proxy_proxy" \
-            "proxy/ship-usage.js:sha256_proxy_ship_usage"; do
+            "proxy/ship-usage.js:sha256_proxy_ship_usage" \
+            "proxy/cert.js:sha256_proxy_cert"; do
   file="${pair%%:*}"
   key="${pair##*:}"
   got=$(sha "$TMP/$file")
@@ -51,7 +52,7 @@ done
 
 mkdir -p "$TARGET/proxy"
 mv "$TMP/install.sh" "$TMP/claudev.sh" "$TMP/version.json" "$TARGET/"
-mv "$TMP/proxy/gen-ca.js" "$TMP/proxy/proxy.js" "$TMP/proxy/ship-usage.js" "$TARGET/proxy/"
+mv "$TMP/proxy/gen-ca.js" "$TMP/proxy/proxy.js" "$TMP/proxy/ship-usage.js" "$TMP/proxy/cert.js" "$TARGET/proxy/"
 
-echo "sync-bundle: published 6 files to $TARGET"
+echo "sync-bundle: published 7 files to $TARGET"
 ( cd "$TARGET" && git status --short )

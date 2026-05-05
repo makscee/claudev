@@ -7,7 +7,7 @@
 # Refuses to run on a dirty working tree: hashing uncommitted edits would
 # ship a "released" sha that desyncs the void-auth mirror from claudev HEAD.
 #
-# Hashed files: claudev.sh + proxy/{gen-ca,proxy,ship-usage}.js.
+# Hashed files: claudev.sh + proxy/{gen-ca,proxy,ship-usage,cert}.js.
 # install.sh is the bootstrap (`curl ... | sh`) and is intentionally not hashed.
 
 set -eu
@@ -30,7 +30,7 @@ sha() {
   fi
 }
 
-for f in claudev.sh proxy/gen-ca.js proxy/proxy.js proxy/ship-usage.js; do
+for f in claudev.sh proxy/gen-ca.js proxy/proxy.js proxy/ship-usage.js proxy/cert.js; do
   [ -f "$f" ] || { echo "build-manifest: missing $f" >&2; exit 1; }
 done
 
@@ -41,6 +41,7 @@ SHA_SH=$(sha claudev.sh)
 SHA_GEN_CA=$(sha proxy/gen-ca.js)
 SHA_PROXY=$(sha proxy/proxy.js)
 SHA_SHIP=$(sha proxy/ship-usage.js)
+SHA_CERT=$(sha proxy/cert.js)
 
 cat > version.json <<EOF
 {
@@ -48,7 +49,8 @@ cat > version.json <<EOF
   "sha256_sh": "$SHA_SH",
   "sha256_proxy_gen_ca": "$SHA_GEN_CA",
   "sha256_proxy_proxy": "$SHA_PROXY",
-  "sha256_proxy_ship_usage": "$SHA_SHIP"
+  "sha256_proxy_ship_usage": "$SHA_SHIP",
+  "sha256_proxy_cert": "$SHA_CERT"
 }
 EOF
 
