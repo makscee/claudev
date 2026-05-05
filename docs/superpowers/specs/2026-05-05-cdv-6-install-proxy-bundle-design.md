@@ -43,6 +43,8 @@ Each file: `curl -fsS <url> -o <dest>` then sha256 check against a hardcoded exp
 
 **Maintenance:** sha256 hashes in install.sh must be updated whenever proxy files change. This is the same burden as the existing claudev.sh hash — accepted pattern.
 
+**Test hook:** install.sh reads `CLAUDEV_INSTALL_BASE_URL` (default: `https://auth.makscee.ru`) for the fetch base. Tests point this at a `python3 -m http.server` rooted on a fixture dir.
+
 `claudev.sh` already resolves proxy files relative to its install location — no path changes needed there.
 
 ### 2. In-Session Periodic Shipper
@@ -51,7 +53,7 @@ After `start_proxy` spawns the proxy process, `claudev.sh` spawns a background l
 
 ```sh
 (
-  while sleep 900; do
+  while sleep "${SHIP_INTERVAL:-900}"; do
     node "$PROXY_DIR/ship-usage.js" "$SESSION_FILE" 2>/dev/null || true
   done
 ) &
@@ -67,9 +69,12 @@ PERIODIC_SHIPPER_PID=$!
 
 ```sh
 kill "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
+wait "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
 ```
 
-Added before the existing final `ship-usage.js` call. Order: kill loop → final ship → kill proxy.
+Added before the existing final `ship-usage.js` call. Order: kill loop → wait for loop exit → final ship → kill proxy.
+
+**Race avoidance:** `wait` blocks until the subshell exits, including any in-flight `node ship-usage.js` invocation. This guarantees periodic ship and final ship never run concurrently against the same offset file. CDV-5's offset writes are append-then-rename (already crash-safe), so a mid-node SIGTERM cannot corrupt offset state.
 
 ### 3. Startup Sweep
 
@@ -112,8 +117,8 @@ claudev.sh session
 
 Extend `test/proxy-lifecycle.bats`:
 
-- `install.sh` test: mock HTTP server serves proxy files; verify all three land at correct paths with correct content
-- Periodic shipper test: set `SHIP_INTERVAL=1` env override in test; verify ship-usage.js called at least once during a short session; verify PERIODIC_SHIPPER_PID killed on stop_proxy
+- `install.sh` test: add `CLAUDEV_INSTALL_BASE_URL` env override in install.sh; bats test starts `python3 -m http.server` on a temp fixture dir, points install.sh at it via env, verifies all three proxy files land at correct paths with correct content
+- Periodic shipper test: set `SHIP_INTERVAL=1` env override; verify ship-usage.js called at least once during a short session; verify PERIODIC_SHIPPER_PID killed and reaped on stop_proxy
 
 ---
 
