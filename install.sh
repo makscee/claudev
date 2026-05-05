@@ -52,6 +52,29 @@ chmod +x "$tmp"
 mv -f "$tmp" "$BIN_DIR/claudev"
 trap - EXIT
 
+mkdir -p "$PROXY_DIR"
+for f in gen-ca.js proxy.js ship-usage.js; do
+  echo "claudev: downloading proxy/$f from $CLAUDEV_AUTH_HOST" >&2
+  proxy_tmp=$(mktemp)
+  curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/proxy/$f" -o "$proxy_tmp"
+
+  if [ "${CLAUDEV_INSTALL_SKIP_VERIFY:-0}" != 1 ]; then
+    # Manifest key: sha256_proxy_<basename-with-_-not-->
+    key=$(printf "sha256_proxy_%s" "$f" | sed 's/[.-]/_/g; s/_js$//')
+    expected_sha=$(extract_sha "$manifest" "$key")
+    actual_sha=$(shasum -a 256 "$proxy_tmp" 2>/dev/null | awk '{print $1}')
+    [ -z "$actual_sha" ] && actual_sha=$(sha256sum "$proxy_tmp" | awk '{print $1}')
+    if [ -z "$expected_sha" ] || [ "$actual_sha" != "$expected_sha" ]; then
+      echo "claudev: sha256 mismatch for proxy/$f (got $actual_sha, want $expected_sha) — aborting" >&2
+      rm -f "$proxy_tmp"
+      exit 1
+    fi
+  fi
+
+  mv "$proxy_tmp" "$PROXY_DIR/$f"
+  chmod 644 "$PROXY_DIR/$f"
+done
+
 # Locale files (best-effort — runtime falls back to en if missing).
 for lang in en ru; do
   curl -fsSL "$CLAUDEV_AUTH_HOST/claudev/locales/${lang}.sh" \
