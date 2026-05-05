@@ -241,10 +241,14 @@ server.listen(0, '127.0.0.1', () => {
   console.log(`claudev-proxy listening on 127.0.0.1:${port}`);
 });
 
-process.on('SIGTERM', () => {
+function gracefulExit() {
+  // server.close() waits for in-flight connections to drain. With keep-alive
+  // sockets from a now-dead claude process those never close, so force-drop
+  // active sockets and arm a hard deadline so the parent shell's `wait` returns.
+  try { server.closeAllConnections?.(); } catch {}
   server.close(() => process.exit(0));
-});
+  setTimeout(() => process.exit(0), 500).unref();
+}
 
-process.on('SIGINT', () => {
-  server.close(() => process.exit(0));
-});
+process.on('SIGTERM', gracefulExit);
+process.on('SIGINT', gracefulExit);
