@@ -547,7 +547,7 @@ start_proxy() {
     while sleep "${SHIP_INTERVAL:-900}"; do
       [ -f "$session_file" ] && node "$CLAUDEV_PROXY_DIR/ship-usage.js" "$session_file" 2>/dev/null || true
     done
-  ) &
+  ) </dev/null >/dev/null 2>&1 &
   PERIODIC_SHIPPER_PID=$!
 
   i=0
@@ -578,6 +578,9 @@ stop_proxy() {
   # to fully exit. Guarantees the final ship below never races against a periodic
   # ship on the same offset file.
   if [ -n "$PERIODIC_SHIPPER_PID" ]; then
+    # Kill subshell's children first (the sleep) so the subshell can return from wait;
+    # then signal the subshell itself; then reap.
+    pkill -P "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
     kill "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
     wait "$PERIODIC_SHIPPER_PID" 2>/dev/null || true
     PERIODIC_SHIPPER_PID=""
