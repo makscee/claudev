@@ -406,3 +406,61 @@ describe('shipFile', () => {
     assert.equal(existsSync(jsonlPath), false);
   });
 });
+
+describe('shipOne', () => {
+  it('POSTs a single-event batch with the bearer token from CLAUDEV_TOKEN_PATH', async () => {
+    // Arrange: tmp token file
+    const tmp = makeTmpDir();
+    const tokenFile = join(tmp, `claudev-shipone-token-${process.pid}`);
+    writeFileSync(tokenFile, 'test-token-xyz');
+    process.env.CLAUDEV_TOKEN_PATH = tokenFile;
+
+    // Arrange: capture-server replacing void-keys
+    let captured = null;
+    const { server, url } = await startMockServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        captured = {
+          method: req.method,
+          path: req.url,
+          authHeader: req.headers['authorization'],
+          body: JSON.parse(body),
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ accepted: 1 }));
+      });
+    });
+    process.env.CLAUDEV_USAGE_API = url;
+
+    // Re-require ship-usage so module-load-time constants pick up env
+    delete require.cache[require.resolve('../ship-usage.js')];
+    const { shipOne } = require('../ship-usage.js');
+
+    const event = {
+      ts: '2026-05-06T12:00:00.000Z',
+      session_id: 12345,
+      token_fingerprint: 'fp',
+      model: 'claude-opus-4-7',
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+    };
+
+    // Act
+    await shipOne(event);
+
+    // Assert
+    assert.equal(captured.method, 'POST');
+    assert.equal(captured.path, '/v1/usage/batch');
+    assert.equal(captured.authHeader, 'Bearer test-token-xyz');
+    assert.deepEqual(captured.body, { events: [event] });
+
+    // Cleanup
+    await stopServer(server);
+    unlinkSync(tokenFile);
+    delete process.env.CLAUDEV_TOKEN_PATH;
+    delete process.env.CLAUDEV_USAGE_API;
+  });
+});
