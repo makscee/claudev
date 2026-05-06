@@ -1,12 +1,19 @@
 #!/usr/bin/env bats
 
-setup() {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME/.claudev/proxy-ca" "$HOME/.claudev/usage"
+load _helpers
 
-  PROXY_JS="$BATS_TEST_DIRNAME/../proxy/proxy.js"
-  MOCK_JS="$BATS_TEST_DIRNAME/helpers/mock-anthropic.js"
-  GEN_CA="$BATS_TEST_DIRNAME/../proxy/gen-ca.js"
+setup() {
+  mkdir -p "$BATS_TEST_TMPDIR/home/.claudev/proxy-ca" "$BATS_TEST_TMPDIR/home/.claudev/usage"
+  # Canonicalize HOME to OS-native form so node.exe's os.homedir()/USERPROFILE
+  # and MSYS bash file-existence checks resolve to the same directory.
+  export HOME="$(_canonpath "$BATS_TEST_TMPDIR/home")"
+  export USERPROFILE="$HOME"
+
+  local _root
+  _root="$(_canonpath "$BATS_TEST_DIRNAME/..")"
+  PROXY_JS="$_root/proxy/proxy.js"
+  MOCK_JS="$_root/test/helpers/mock-anthropic.js"
+  GEN_CA="$_root/proxy/gen-ca.js"
 
   # Generate CA for the proxy
   node "$GEN_CA"

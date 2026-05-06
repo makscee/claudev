@@ -1,9 +1,14 @@
 #!/usr/bin/env bats
 
+load _helpers
+
 setup() {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  GEN_CA="$BATS_TEST_DIRNAME/../proxy/gen-ca.js"
+  mkdir -p "$BATS_TEST_TMPDIR/home"
+  # Canonicalize HOME to OS-native form so node.exe's os.homedir()/USERPROFILE
+  # and MSYS bash file-existence checks resolve to the same directory.
+  export HOME="$(_canonpath "$BATS_TEST_TMPDIR/home")"
+  export USERPROFILE="$HOME"
+  GEN_CA="$(_canonpath "$BATS_TEST_DIRNAME/..")/proxy/gen-ca.js"
 }
 
 @test "gen-ca creates ca.pem and ca-key.pem with correct perms" {
@@ -18,7 +23,10 @@ setup() {
   else
     perms=$(stat -c '%a' "$HOME/.claudev/proxy-ca/ca-key.pem")
   fi
-  [ "$perms" = "600" ]
+  # perms check skipped on MSYS — chmod 600 is a no-op on NTFS
+  if [[ "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]]; then
+    [ "$perms" = "600" ]
+  fi
 }
 
 @test "gen-ca is idempotent — second run preserves existing files" {
