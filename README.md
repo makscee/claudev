@@ -12,6 +12,33 @@ The `eval` form activates `~/.local/bin` on `PATH` in the current shell on first
 
 Then run `claudev` to log in (you'll need an admin-issued access code) and launch Claude Code.
 
+## Windows (Git Bash)
+
+claudev runs natively under [Git Bash](https://gitforwindows.org/) (no WSL required). Open a Git Bash window and run the same one-liner:
+
+```sh
+eval "$(curl -fsSL https://auth.makscee.ru/claudev/install.sh | sh)"
+```
+
+Or clone and run the installer locally:
+
+```sh
+git clone https://github.com/makscee/claudev.git
+cd claudev
+bash install.sh        # or: ./install.sh
+```
+
+Restart Git Bash after install so the updated `PATH` takes effect. The installer writes to `~/.bash_profile` (creating it if needed) and ensures it sources `~/.bashrc`, so both files participate.
+
+### NTFS / chmod note
+
+`chmod +x` is a no-op on NTFS — Git Bash treats files as executable based on extension and shebang. The installer is invoked as `bash install.sh` or `./install.sh`, and the wrapper is callable as either `claudev` or `claudev.sh` from the shell.
+
+### Troubleshooting
+
+- `claudev: command not found` — check `echo $PATH` includes `$HOME/.local/bin`. If not, verify `~/.bash_profile` exists and contains the `export PATH=...` line, and that it sources `~/.bashrc` (the installer does this automatically).
+- Restart Git Bash after install — open shells don't pick up `PATH` changes from rc files.
+
 ## Configuration
 
 Hosts are overridable via env vars (defaults shown):

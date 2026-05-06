@@ -96,6 +96,15 @@ case ":$PATH:" in
     # '$HOME/.local/bin' written into the rc file, not the expanded path.
     # shellcheck disable=SC2016
     EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH" # claudev'
+    # Detect Git Bash on Windows. MSYSTEM is set to MINGW64/MINGW32 by Git Bash;
+    # `uname -a` also reports mingw. WSL reports linux and is handled by the
+    # normal linux branch.
+    _is_git_bash() {
+      case "${MSYSTEM:-}" in
+        MINGW*|MSYS*) return 0 ;;
+      esac
+      uname -a 2>/dev/null | grep -qi mingw
+    }
     _rc_append() {
       rc="$1"
       # Idempotent: skip if either quote-style already present.
@@ -110,12 +119,25 @@ case ":$PATH:" in
       printf '\n%s\n' "$EXPORT_LINE" >> "$rc"
     }
     rc_updated=""
-    for _candidate in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.profile"; do
-      if [ -f "$_candidate" ]; then
-        _rc_append "$_candidate"
-        rc_updated="${rc_updated:+$rc_updated, }$_candidate"
+    if _is_git_bash; then
+      # Git Bash: only login shells run, so ~/.bash_profile is the canonical
+      # rc file. Create it if absent and ensure it sources ~/.bashrc so users
+      # who later add to ~/.bashrc still get those changes.
+      _gb_profile="$HOME/.bash_profile"
+      [ -f "$_gb_profile" ] || touch "$_gb_profile"
+      if ! grep -qF '. ~/.bashrc' "$_gb_profile" 2>/dev/null; then
+        printf '\n# source .bashrc if it exists\n[ -f ~/.bashrc ] && . ~/.bashrc\n' >> "$_gb_profile"
       fi
-    done
+      _rc_append "$_gb_profile"
+      rc_updated="$_gb_profile"
+    else
+      for _candidate in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.profile"; do
+        if [ -f "$_candidate" ]; then
+          _rc_append "$_candidate"
+          rc_updated="${rc_updated:+$rc_updated, }$_candidate"
+        fi
+      done
+    fi
     if [ -z "$rc_updated" ]; then
       # No rc file found — pick the right one for the user's shell.
       # zsh (macOS default) ignores ~/.profile; create ~/.zshrc instead.
