@@ -73,11 +73,51 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$HOME/.claude.json" ]
 
-  # All four keys must be present after merge
-  [ "$(jq -r '.installMethod' "$HOME/.claude.json")" = "native" ]
-  [ "$(jq -r '.userID' "$HOME/.claude.json")" = "abc" ]
-  [ "$(jq -r '.hasCompletedOnboarding' "$HOME/.claude.json")" = "true" ]
-  v=$(jq -r '.lastOnboardingVersion' "$HOME/.claude.json")
-  [ -n "$v" ]
-  [ "$v" != "null" ]
+  # Assert via grep on file text — works on Win Git Bash (no jq, MS-Store python3
+  # shim that fails sanity probe) just as well as on macOS/Linux. Tolerates the
+  # spacing variations our three writer tiers produce (`"k": v` and `"k":v`).
+  merged=$(cat "$HOME/.claude.json")
+  printf '%s' "$merged" | grep -Eq '"installMethod"[[:space:]]*:[[:space:]]*"native"'
+  printf '%s' "$merged" | grep -Eq '"userID"[[:space:]]*:[[:space:]]*"abc"'
+  printf '%s' "$merged" | grep -Eq '"hasCompletedOnboarding"[[:space:]]*:[[:space:]]*true'
+  printf '%s' "$merged" | grep -Eq '"lastOnboardingVersion"[[:space:]]*:[[:space:]]*"[^"]+"'
+}
+
+# ── Case (e): pure-shell fallback (no jq, no python3) — exercised on all OSes ─
+
+@test "install_claude: merges via pure-shell fallback when jq + python3 absent" {
+  # npm stub installs working `claude`.
+  cat > "$STUB_BIN/npm" <<'EOF'
+#!/bin/sh
+printf '#!/bin/sh\necho "2.1.123 (Claude Code)"\n' > "$(dirname "$0")/claude"
+chmod +x "$(dirname "$0")/claude"
+exit 0
+EOF
+  chmod +x "$STUB_BIN/npm"
+
+  # python3 stub that mimics the Windows MS-Store launcher: any invocation
+  # exits non-zero with a 'not found'-style message. Sanity probe must reject it.
+  cat > "$STUB_BIN/python3" <<'EOF'
+#!/bin/sh
+echo "Python was not found; run without arguments to install from the Microsoft Store" >&2
+exit 9009
+EOF
+  chmod +x "$STUB_BIN/python3"
+
+  # Pre-seed file to force the merge branch.
+  printf '{"installMethod":"native","userID":"abc"}\n' > "$HOME/.claude.json"
+
+  # PATH lacks jq (we don't add it to STUB_BIN) and python3 stub fails sanity
+  # probe → tier 3 (pure shell) must run.
+  run sh -c "PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-install-claude </dev/null"
+  [ "$status" -eq 0 ]
+  [ -f "$HOME/.claude.json" ]
+
+  merged=$(cat "$HOME/.claude.json")
+  printf '%s' "$merged" | grep -Eq '"installMethod"[[:space:]]*:[[:space:]]*"native"'
+  printf '%s' "$merged" | grep -Eq '"userID"[[:space:]]*:[[:space:]]*"abc"'
+  printf '%s' "$merged" | grep -Eq '"hasCompletedOnboarding"[[:space:]]*:[[:space:]]*true'
+  printf '%s' "$merged" | grep -Eq '"lastOnboardingVersion"[[:space:]]*:[[:space:]]*"[^"]+"'
+  # No CRLF leakage from the shell-merge path.
+  ! printf '%s' "$merged" | grep -q $'\r'
 }
