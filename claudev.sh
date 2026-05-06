@@ -13,6 +13,11 @@ CLAUDEV_CONFIG="${CLAUDEV_HOME}/config"
 # shellcheck disable=SC2034 # used by later tasks (T6+ token cache)
 CLAUDEV_TOKEN="${CLAUDEV_HOME}/token"
 
+# Probe fractional sleep support once. Git Bash on Windows uses a builtin
+# `sleep` that rejects fractional seconds; mac/linux coreutils accept them.
+command sleep 0.1 2>/dev/null && _SLEEP_FRACTIONAL=1 || _SLEEP_FRACTIONAL=0
+_psleep() { if [ "$_SLEEP_FRACTIONAL" = 1 ]; then sleep 0.1; else sleep 1; fi; }
+
 # Resolve script's own directory so we can source locale files even when
 # launched via symlink in ~/.local/bin.
 script_path() {
@@ -600,8 +605,10 @@ start_proxy() {
   PERIODIC_SHIPPER_PID=$!
 
   i=0
+  # Git Bash `sleep` builtin rejects fractional → 10x coarser fallback OK
+  # for one-time startup poll. _psleep picks 0.1s vs 1s based on probe.
   while [ $i -lt 50 ] && [ ! -f "$proxy_ready" ]; do
-    sleep 0.1
+    _psleep
     i=$((i + 1))
   done
 
