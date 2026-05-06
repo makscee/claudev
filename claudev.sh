@@ -15,7 +15,7 @@ CLAUDEV_TOKEN="${CLAUDEV_HOME}/token"
 
 # Probe fractional sleep support once. Git Bash on Windows uses a builtin
 # `sleep` that rejects fractional seconds; mac/linux coreutils accept them.
-command sleep 0.1 2>/dev/null && _SLEEP_FRACTIONAL=1 || _SLEEP_FRACTIONAL=0
+command sleep 0.001 2>/dev/null && _SLEEP_FRACTIONAL=1 || _SLEEP_FRACTIONAL=0
 _psleep() { if [ "$_SLEEP_FRACTIONAL" = 1 ]; then sleep 0.1; else sleep 1; fi; }
 
 # Resolve script's own directory so we can source locale files even when
