@@ -48,6 +48,17 @@ teardown() { mock_stop; }
   echo "$output" | grep -qi "exhaust"
 }
 
+@test "fetch_key exits 4 on HTTP 500 server error" {
+  body='{"error":"internal"}'
+  printf 'HTTP/1.1 500 Internal Server Error\r\nContent-Length: %d\r\n\r\n%s' "${#body}" "$body" > "$BATS_TEST_TMPDIR/resp"
+  mock_start "$BATS_TEST_TMPDIR/resp"
+  run sh -c "CLAUDEV_KEYS_HOST=http://127.0.0.1:$MOCK_PORT $CLAUDEV --selftest-fetch-key"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "server error (HTTP 500)"
+  echo "$output" | grep -q "127.0.0.1:$MOCK_PORT"
+  ! echo "$output" | grep -qi "network error"
+}
+
 @test "fetch_key wipes token on 401" {
   body=''
   printf 'HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n' > "$BATS_TEST_TMPDIR/resp"
