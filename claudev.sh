@@ -164,6 +164,7 @@ _bootstrap_node_macos() {
 }
 
 _bootstrap_node_linux() {
+  # Linux: distro pkg managers only; Linuxbrew not supported.
   if command -v apt-get >/dev/null 2>&1; then
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 \
       && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs >/dev/null 2>&1
@@ -186,10 +187,16 @@ _bootstrap_node_windows() {
 }
 
 bootstrap_node() {
-  # Skip path: node already on PATH OR claude --version succeeds.
+  # Skip path: node ≥ 18 already on PATH OR claude --version succeeds.
+  # Claude Code requires node 18+; older node falls through to install.
+  # Claude itself bundles its own node, so claude --version skip stays unconditional.
   if command -v node >/dev/null 2>&1; then
-    printf "node already present, skipping install\n" >&2
-    return 0
+    _node_ver=$(node --version 2>/dev/null | sed -n 's/^v\([0-9][0-9]*\).*/\1/p')
+    if [ -n "$_node_ver" ] && [ "$_node_ver" -ge 18 ] 2>/dev/null; then
+      printf "node already present (v%s), skipping install\n" "$_node_ver" >&2
+      return 0
+    fi
+    printf "node present but < 18 (v%s), upgrading\n" "${_node_ver:-?}" >&2
   fi
   if command -v claude >/dev/null 2>&1 && claude --version >/dev/null 2>&1; then
     printf "claude already present, skipping node install\n" >&2

@@ -29,6 +29,37 @@ EOF
   echo "$output" | grep -qi "already" || echo "$output" | grep -qi "skip"
 }
 
+# ── Skip-guard: node < 18 falls through to installer ───────────────────────
+
+@test "bootstrap_node: node 14 falls through to installer (does NOT skip)" {
+  # Stub node v14 — below Claude Code minimum of 18.
+  cat > "$STUB_BIN/node" <<'EOF'
+#!/bin/sh
+echo "v14.21.3"
+EOF
+  chmod +x "$STUB_BIN/node"
+
+  # Provide a brew stub so the macOS dispatch path resolves and we can detect
+  # that the function fell through to the installer rather than skipping.
+  cat > "$STUB_BIN/brew" <<EOF
+#!/bin/sh
+echo "brew \$*" >> "$TRACE"
+cat > "$STUB_BIN/npm" <<'NPMEOF'
+#!/bin/sh
+exit 0
+NPMEOF
+chmod +x "$STUB_BIN/npm"
+exit 0
+EOF
+  chmod +x "$STUB_BIN/brew"
+
+  run sh -c "OSTYPE=darwin23 PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-bootstrap-node </dev/null"
+  [ "$status" -eq 0 ]
+  # Skip path would NOT touch brew; fall-through must invoke it.
+  [ -f "$TRACE" ]
+  grep -q "brew install" "$TRACE"
+}
+
 # ── Skip path: claude --version succeeds ────────────────────────────────────
 
 @test "bootstrap_node: skip when claude --version succeeds (even without node)" {
