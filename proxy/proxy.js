@@ -9,6 +9,7 @@ const { readFileSync, writeFileSync, mkdirSync, appendFileSync } = require('fs')
 const { join } = require('path');
 const { homedir } = require('os');
 const { createServerCert } = require('./cert.js');
+const { shipOne } = require('./ship-usage.js');
 
 const TARGET_HOST = process.env.CLAUDEV_PROXY_TARGET_HOST || 'api.anthropic.com';
 const TARGET_PORT = parseInt(process.env.CLAUDEV_PROXY_TARGET_PORT || '443', 10);
@@ -246,7 +247,7 @@ function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint
 }
 
 function writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens) {
-  const row = JSON.stringify({
+  const event = {
     ts: new Date().toISOString(),
     session_id: SESSION_ID,
     token_fingerprint: tokenFingerprint,
@@ -255,9 +256,10 @@ function writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCre
     output_tokens: outputTokens,
     cache_creation_tokens: cacheCreationTokens,
     cache_read_tokens: cacheReadTokens,
-  });
+  };
   const filePath = join(usageDir, `session-${SESSION_ID}.jsonl`);
-  appendFileSync(filePath, row + '\n');
+  appendFileSync(filePath, JSON.stringify(event) + '\n');
+  shipOne(event).catch((e) => process.stderr.write(`ship-usage: shipOne failed: ${e.message}\n`));
 }
 
 server.listen(0, '127.0.0.1', () => {

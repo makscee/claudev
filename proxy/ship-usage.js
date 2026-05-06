@@ -73,6 +73,11 @@ function postBatch(token, events) {
   });
 }
 
+async function shipOne(event) {
+  const token = fs.readFileSync(TOKEN_PATH, 'utf8').trim();
+  await postBatch(token, [event]);
+}
+
 function readOffset(filePath) {
   try {
     return parseInt(fs.readFileSync(filePath + '.offset', 'utf8').trim(), 10) || 0;
@@ -201,7 +206,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  parseJsonl, chunkEvents, postBatch, shipFile,
+  parseJsonl, chunkEvents, postBatch, shipFile, shipOne,
   readOffset, writeOffset, deleteOffset,
   isOrphan, sweep,
   BATCH_SIZE, SWEEP_CAP, STALE_MTIME_MS,
