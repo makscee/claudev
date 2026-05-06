@@ -185,7 +185,7 @@ _bootstrap_node_windows() {
   # fall back to chocolatey if installed. Neither manages current-shell PATH —
   # warn after install if `node` still isn't on PATH; a fresh shell will pick it up.
   if command -v winget >/dev/null 2>&1; then
-    if winget install OpenJS.NodeJS.LTS; then
+    if winget install --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements; then
       command -v node >/dev/null 2>&1 || \
         printf "node installed via winget; reopen your shell to pick up PATH changes\n" >&2
       return 0

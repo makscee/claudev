@@ -145,7 +145,7 @@ EOF
   run sh -c "OSTYPE=msys PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-bootstrap-node </dev/null"
   [ "$status" -eq 0 ]
   [ -f "$TRACE" ]
-  grep -q "winget install OpenJS.NodeJS.LTS" "$TRACE"
+  grep -qF "winget install --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements" "$TRACE"
 }
 
 @test "bootstrap_node: Windows (winget missing, choco present) falls back to choco install nodejs-lts -y" {
