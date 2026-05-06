@@ -154,14 +154,20 @@ have_claude() {
   command -v claude >/dev/null 2>&1
 }
 
-bootstrap_node() {
-  # Best-effort node 22 install via the platform's package manager.
-  printf "%s\n" "$L_NODE_INSTALLING" >&2
+_bootstrap_node_macos() {
+  if command -v brew >/dev/null 2>&1; then
+    brew install -q node >/dev/null 2>&1
+  else
+    return 1
+  fi
+  command -v npm >/dev/null 2>&1
+}
+
+_bootstrap_node_linux() {
+  # Linux: distro pkg managers only; Linuxbrew not supported.
   if command -v apt-get >/dev/null 2>&1; then
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 \
       && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs >/dev/null 2>&1
-  elif command -v brew >/dev/null 2>&1; then
-    brew install -q node >/dev/null 2>&1
   elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache nodejs npm >/dev/null 2>&1
   elif command -v pacman >/dev/null 2>&1; then
@@ -172,6 +178,74 @@ bootstrap_node() {
     return 1
   fi
   command -v npm >/dev/null 2>&1
+}
+
+_bootstrap_node_windows() {
+  # Windows (Git Bash / MSYS / Cygwin): prefer winget (built into Win10 1709+),
+  # fall back to chocolatey if installed. Neither manages current-shell PATH —
+  # warn after install if `node` still isn't on PATH; a fresh shell will pick it up.
+  if command -v winget >/dev/null 2>&1; then
+    if winget install --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements; then
+      command -v node >/dev/null 2>&1 || \
+        printf "node installed via winget; reopen your shell to pick up PATH changes\n" >&2
+      return 0
+    fi
+    return 1
+  fi
+  if command -v choco >/dev/null 2>&1; then
+    if choco install nodejs-lts -y; then
+      command -v node >/dev/null 2>&1 || \
+        printf "node installed via choco; reopen your shell to pick up PATH changes\n" >&2
+      return 0
+    fi
+    return 1
+  fi
+  printf "windows install: neither winget nor choco found on PATH.\n" >&2
+  printf "  - winget ships with Windows 10 1709+ / Windows 11; run it from a fresh terminal.\n" >&2
+  printf "  - choco (Chocolatey) needs manual install: https://chocolatey.org/install\n" >&2
+  printf "Install one of them, then re-run claudev.\n" >&2
+  return 1
+}
+
+bootstrap_node() {
+  # Skip path: node ≥ 18 already on PATH OR claude --version succeeds.
+  # Claude Code requires node 18+; older node falls through to install.
+  # Claude itself bundles its own node, so claude --version skip stays unconditional.
+  if command -v node >/dev/null 2>&1; then
+    _node_ver=$(node --version 2>/dev/null | sed -n 's/^v\([0-9][0-9]*\).*/\1/p')
+    if [ -n "$_node_ver" ] && [ "$_node_ver" -ge 18 ] 2>/dev/null; then
+      printf "node already present (v%s), skipping install\n" "$_node_ver" >&2
+      return 0
+    fi
+    printf "node present but < 18 (v%s), upgrading\n" "${_node_ver:-?}" >&2
+  fi
+  if command -v claude >/dev/null 2>&1 && claude --version >/dev/null 2>&1; then
+    printf "claude already present, skipping node install\n" >&2
+    return 0
+  fi
+
+  printf "%s\n" "$L_NODE_INSTALLING" >&2
+
+  # OS detect → dispatch. $OSTYPE is bash-ish but widely set; fall back to uname.
+  # SC3028: OSTYPE is intentional — set by bash/zsh/Git-Bash; fallback handles sh.
+  # shellcheck disable=SC3028
+  _os_marker="${OSTYPE:-}"
+  [ -z "$_os_marker" ] && _os_marker=$(uname -s 2>/dev/null || echo unknown)
+  case "$_os_marker" in
+    msys*|cygwin*|mingw*|MINGW*|MSYS*|CYGWIN*)
+      _bootstrap_node_windows
+      ;;
+    darwin*|Darwin*)
+      _bootstrap_node_macos
+      ;;
+    linux*|Linux*)
+      _bootstrap_node_linux
+      ;;
+    *)
+      # Unknown OS — best-effort linux path (matches old behaviour for BSDs etc.)
+      _bootstrap_node_linux
+      ;;
+  esac
 }
 
 install_claude() {
@@ -569,6 +643,11 @@ case "${1:-}" in
   --selftest-install-claude)
     load_locale
     install_claude
+    exit $?
+    ;;
+  --selftest-bootstrap-node)
+    load_locale
+    bootstrap_node
     exit $?
     ;;
   --selftest-login)
