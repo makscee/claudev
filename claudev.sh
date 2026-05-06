@@ -5,6 +5,30 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
+# --- self-update trampoline (CDV-9) ---
+# Windows (Git Bash / MSYS / Cygwin) locks the running script file, so
+# self_update can't mv-over-self. On those platforms self_update writes the new
+# script to claudev.sh.next alongside this file; on the next launch we swap it
+# in here (before any other work) and re-exec. Posix unaffected: this block is
+# a no-op when no .next is staged. Single-shot: after exec, the second pass
+# sees no .next and falls through to the cleanup branch.
+_cdv_self_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || _cdv_self_dir=""
+if [ -n "$_cdv_self_dir" ]; then
+  _cdv_self_base=$(basename "$0")
+  _cdv_self_path="$_cdv_self_dir/$_cdv_self_base"
+  if [ -f "$_cdv_self_dir/$_cdv_self_base.next" ]; then
+    mv -f "$_cdv_self_path" "$_cdv_self_dir/$_cdv_self_base.old" 2>/dev/null || true
+    if mv -f "$_cdv_self_dir/$_cdv_self_base.next" "$_cdv_self_path"; then
+      chmod +x "$_cdv_self_path" 2>/dev/null || true
+      unset _cdv_self_dir _cdv_self_base _cdv_self_path
+      exec "$0" "$@"
+    fi
+  else
+    [ -f "$_cdv_self_dir/$_cdv_self_base.old" ] && rm -f "$_cdv_self_dir/$_cdv_self_base.old"
+  fi
+fi
+unset _cdv_self_dir _cdv_self_base _cdv_self_path 2>/dev/null || true
+
 CLAUDEV_VERSION="0.2.13"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
@@ -491,6 +515,22 @@ self_update() {
     fi
   done
   chmod +x "$stage_dir/claudev.sh"
+  # Windows file lock: can't mv-over-self while running. Stage as .next and let
+  # the trampoline (top of script) swap on next launch. See CDV-9.
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      _self_dir=$(cd "$(dirname "$0")" && pwd)
+      _self_base=$(basename "$0")
+      if ! mv -f "$stage_dir/claudev.sh" "$_self_dir/$_self_base.next"; then
+        echo "claudev: PARTIAL PUBLISH — claudev.sh.next failed to stage (staged files at $stage_dir); run install.sh to recover" >&2
+        return 1
+      fi
+      rm -rf "$stage_dir"
+      refresh_locales
+      echo "claudev: update staged — applies on next launch"
+      return 0
+      ;;
+  esac
   if ! mv -f "$stage_dir/claudev.sh" "$0"; then
     echo "claudev: PARTIAL PUBLISH — claudev.sh failed to install (staged files at $stage_dir); run install.sh to recover" >&2
     return 1
