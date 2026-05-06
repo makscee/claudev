@@ -23,7 +23,10 @@ setup() {
   else
     perms=$(stat -c '%a' "$HOME/.claudev/proxy-ca/ca-key.pem")
   fi
-  [ "$perms" = "600" ]
+  # perms check skipped on MSYS — chmod 600 is a no-op on NTFS
+  if [[ "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]]; then
+    [ "$perms" = "600" ]
+  fi
 }
 
 @test "gen-ca is idempotent — second run preserves existing files" {
