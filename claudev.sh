@@ -5,7 +5,7 @@
 # Spec: docs/superpowers/specs/2026-04-30-claudev-v1-design.md
 set -eu
 
-CLAUDEV_VERSION="0.2.12"
+CLAUDEV_VERSION="0.2.13"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -434,18 +434,11 @@ bootstrap_proxy_bundle() {
 
 # shellcheck disable=SC2120 # $@ used only on the exec path; callers pass none
 self_update() {
-  # Honor CLAUDEV_FORCE_UPDATE=1 OR cache-miss (1h since last check).
-  now=$(date +%s)
-  last=$(config_get last_update_check)
-  : "${last:=0}"
-  cache_age=$(( now - last ))
-  if [ "${CLAUDEV_FORCE_UPDATE:-0}" != 1 ] && [ "$cache_age" -lt 3600 ]; then
-    return 0
-  fi
+  # Always probe the manifest — every claudev launch checks for updates.
+  # The probe is one ~500-byte GET; cheap enough to not warrant a TTL.
   manifest=$(curl -fsS "$CLAUDEV_AUTH_HOST/claudev/version.json" 2>/dev/null) || return 0
   remote_version=$(printf "%s" "$manifest" | extract_json_string version)
   remote_sha=$(printf "%s" "$manifest" | extract_json_string sha256_sh)
-  config_set last_update_check "$now"
   if [ -z "$remote_version" ]; then return 0; fi
   if [ "$remote_version" = "$CLAUDEV_VERSION" ]; then
     [ "${CLAUDEV_FORCE_UPDATE:-0}" = 1 ] && echo "claudev: up to date ($CLAUDEV_VERSION)"
