@@ -37,12 +37,14 @@ setup() {
 
 @test "createServerCert returns cert signed by CA for given hostname" {
   tmpdir="$(mktemp -d)"
+  local tmpdir_w
+  tmpdir_w="$(_canonpath "$tmpdir")"
   node -e "
     const { createCaCert, createServerCert } = require('$CERT_JS');
     const ca = createCaCert();
     const srv = createServerCert(ca.cert, ca.key, 'test.local');
-    require('fs').writeFileSync('$tmpdir/ca.pem', ca.cert);
-    require('fs').writeFileSync('$tmpdir/srv.pem', srv.cert);
+    require('fs').writeFileSync('$tmpdir_w/ca.pem', ca.cert);
+    require('fs').writeFileSync('$tmpdir_w/srv.pem', srv.cert);
   "
 
   # Verify server cert against CA

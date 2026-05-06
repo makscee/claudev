@@ -3,8 +3,11 @@
 load _helpers
 
 setup() {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
+  mkdir -p "$BATS_TEST_TMPDIR/home"
+  # Canonicalize HOME to OS-native form so node.exe's os.homedir()/USERPROFILE
+  # and MSYS bash file-existence checks resolve to the same directory.
+  export HOME="$(_canonpath "$BATS_TEST_TMPDIR/home")"
+  export USERPROFILE="$HOME"
   GEN_CA="$(_canonpath "$BATS_TEST_DIRNAME/..")/proxy/gen-ca.js"
 }
 
