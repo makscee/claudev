@@ -132,23 +132,39 @@ EOF
   grep -q "apt-get install" "$TRACE"
 }
 
-# ── Windows path → _bootstrap_node_windows stub ─────────────────────────────
+# ── Windows path → _bootstrap_node_windows ─────────────────────────────────
 
-@test "bootstrap_node: Windows OSTYPE (msys) routes to _bootstrap_node_windows stub" {
+@test "bootstrap_node: Windows (winget present) calls winget install OpenJS.NodeJS.LTS" {
+  cat > "$STUB_BIN/winget" <<EOF
+#!/bin/sh
+echo "winget \$*" >> "$TRACE"
+exit 0
+EOF
+  chmod +x "$STUB_BIN/winget"
+
   run sh -c "OSTYPE=msys PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-bootstrap-node </dev/null"
-  # T1 stub returns 1 — assert non-zero AND the windows-marker log line.
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -qi "windows"
+  [ "$status" -eq 0 ]
+  [ -f "$TRACE" ]
+  grep -q "winget install OpenJS.NodeJS.LTS" "$TRACE"
 }
 
-@test "bootstrap_node: Windows OSTYPE (cygwin) routes to _bootstrap_node_windows stub" {
+@test "bootstrap_node: Windows (winget missing, choco present) falls back to choco install nodejs-lts -y" {
+  cat > "$STUB_BIN/choco" <<EOF
+#!/bin/sh
+echo "choco \$*" >> "$TRACE"
+exit 0
+EOF
+  chmod +x "$STUB_BIN/choco"
+
   run sh -c "OSTYPE=cygwin PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-bootstrap-node </dev/null"
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -qi "windows"
+  [ "$status" -eq 0 ]
+  [ -f "$TRACE" ]
+  grep -q "choco install nodejs-lts -y" "$TRACE"
 }
 
-@test "bootstrap_node: Windows OSTYPE (mingw) routes to _bootstrap_node_windows stub" {
+@test "bootstrap_node: Windows (neither winget nor choco) prints actionable error and returns 1" {
   run sh -c "OSTYPE=mingw64 PATH=\"$STUB_BIN:/usr/bin:/bin\" HOME=\"$HOME\" $CLAUDEV --selftest-bootstrap-node </dev/null"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -qi "windows"
+  echo "$output" | grep -qi "winget"
+  echo "$output" | grep -qi "choco"
 }

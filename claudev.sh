@@ -181,8 +181,29 @@ _bootstrap_node_linux() {
 }
 
 _bootstrap_node_windows() {
-  # T2 will fill this in (winget path). For now, stub.
-  printf "windows install: TODO (T2)\n" >&2
+  # Windows (Git Bash / MSYS / Cygwin): prefer winget (built into Win10 1709+),
+  # fall back to chocolatey if installed. Neither manages current-shell PATH —
+  # warn after install if `node` still isn't on PATH; a fresh shell will pick it up.
+  if command -v winget >/dev/null 2>&1; then
+    if winget install OpenJS.NodeJS.LTS; then
+      command -v node >/dev/null 2>&1 || \
+        printf "node installed via winget; reopen your shell to pick up PATH changes\n" >&2
+      return 0
+    fi
+    return 1
+  fi
+  if command -v choco >/dev/null 2>&1; then
+    if choco install nodejs-lts -y; then
+      command -v node >/dev/null 2>&1 || \
+        printf "node installed via choco; reopen your shell to pick up PATH changes\n" >&2
+      return 0
+    fi
+    return 1
+  fi
+  printf "windows install: neither winget nor choco found on PATH.\n" >&2
+  printf "  - winget ships with Windows 10 1709+ / Windows 11; run it from a fresh terminal.\n" >&2
+  printf "  - choco (Chocolatey) needs manual install: https://chocolatey.org/install\n" >&2
+  printf "Install one of them, then re-run claudev.\n" >&2
   return 1
 }
 
