@@ -62,7 +62,7 @@ Anything else passes through to `claude` verbatim. So `claudev --print "hi"` run
 
 ## Status
 
-v1 — POSIX-sh, mac/linux only. Windows is v2 (use WSL for now).
+v1 — POSIX-sh, mac/linux + Windows (Git Bash). WSL also works.
 
 ## Spec + plan
 
