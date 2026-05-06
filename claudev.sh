@@ -154,14 +154,19 @@ have_claude() {
   command -v claude >/dev/null 2>&1
 }
 
-bootstrap_node() {
-  # Best-effort node 22 install via the platform's package manager.
-  printf "%s\n" "$L_NODE_INSTALLING" >&2
+_bootstrap_node_macos() {
+  if command -v brew >/dev/null 2>&1; then
+    brew install -q node >/dev/null 2>&1
+  else
+    return 1
+  fi
+  command -v npm >/dev/null 2>&1
+}
+
+_bootstrap_node_linux() {
   if command -v apt-get >/dev/null 2>&1; then
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 \
       && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs >/dev/null 2>&1
-  elif command -v brew >/dev/null 2>&1; then
-    brew install -q node >/dev/null 2>&1
   elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache nodejs npm >/dev/null 2>&1
   elif command -v pacman >/dev/null 2>&1; then
@@ -172,6 +177,47 @@ bootstrap_node() {
     return 1
   fi
   command -v npm >/dev/null 2>&1
+}
+
+_bootstrap_node_windows() {
+  # T2 will fill this in (winget path). For now, stub.
+  printf "windows install: TODO (T2)\n" >&2
+  return 1
+}
+
+bootstrap_node() {
+  # Skip path: node already on PATH OR claude --version succeeds.
+  if command -v node >/dev/null 2>&1; then
+    printf "node already present, skipping install\n" >&2
+    return 0
+  fi
+  if command -v claude >/dev/null 2>&1 && claude --version >/dev/null 2>&1; then
+    printf "claude already present, skipping node install\n" >&2
+    return 0
+  fi
+
+  printf "%s\n" "$L_NODE_INSTALLING" >&2
+
+  # OS detect → dispatch. $OSTYPE is bash-ish but widely set; fall back to uname.
+  # SC3028: OSTYPE is intentional — set by bash/zsh/Git-Bash; fallback handles sh.
+  # shellcheck disable=SC3028
+  _os_marker="${OSTYPE:-}"
+  [ -z "$_os_marker" ] && _os_marker=$(uname -s 2>/dev/null || echo unknown)
+  case "$_os_marker" in
+    msys*|cygwin*|mingw*|MINGW*|MSYS*|CYGWIN*)
+      _bootstrap_node_windows
+      ;;
+    darwin*|Darwin*)
+      _bootstrap_node_macos
+      ;;
+    linux*|Linux*)
+      _bootstrap_node_linux
+      ;;
+    *)
+      # Unknown OS — best-effort linux path (matches old behaviour for BSDs etc.)
+      _bootstrap_node_linux
+      ;;
+  esac
 }
 
 install_claude() {
@@ -569,6 +615,11 @@ case "${1:-}" in
   --selftest-install-claude)
     load_locale
     install_claude
+    exit $?
+    ;;
+  --selftest-bootstrap-node)
+    load_locale
+    bootstrap_node
     exit $?
     ;;
   --selftest-login)
