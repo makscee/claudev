@@ -1,12 +1,16 @@
 #!/usr/bin/env bats
 
+load _helpers
+
 setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME/.claudev/proxy-ca" "$HOME/.claudev/usage"
 
-  PROXY_JS="$BATS_TEST_DIRNAME/../proxy/proxy.js"
-  MOCK_JS="$BATS_TEST_DIRNAME/helpers/mock-anthropic.js"
-  GEN_CA="$BATS_TEST_DIRNAME/../proxy/gen-ca.js"
+  local _root
+  _root="$(_canonpath "$BATS_TEST_DIRNAME/..")"
+  PROXY_JS="$_root/proxy/proxy.js"
+  MOCK_JS="$_root/test/helpers/mock-anthropic.js"
+  GEN_CA="$_root/proxy/gen-ca.js"
 
   # Generate CA for the proxy
   node "$GEN_CA"

@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 
+load _helpers
+
 setup() {
-  CERT_JS="$BATS_TEST_DIRNAME/../proxy/cert.js"
+  CERT_JS="$(_canonpath "$BATS_TEST_DIRNAME/..")/proxy/cert.js"
 }
 
 @test "createCaCert returns PEM cert and key" {

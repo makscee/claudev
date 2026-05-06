@@ -1,9 +1,11 @@
 #!/usr/bin/env bats
 
+load _helpers
+
 setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  GEN_CA="$BATS_TEST_DIRNAME/../proxy/gen-ca.js"
+  GEN_CA="$(_canonpath "$BATS_TEST_DIRNAME/..")/proxy/gen-ca.js"
 }
 
 @test "gen-ca creates ca.pem and ca-key.pem with correct perms" {
