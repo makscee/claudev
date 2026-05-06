@@ -542,6 +542,12 @@ fetch_key() {
       printf "%s\n" "$L_POOL_EMPTY" >&2
       exit 1
       ;;
+    5*)
+      rm -f "$resp_file"
+      # shellcheck disable=SC2059
+      printf "${L_SERVER_ERROR}\n" "$code" "$CLAUDEV_KEYS_HOST" >&2
+      exit 4
+      ;;
     *)
       rm -f "$resp_file"
       # shellcheck disable=SC2059
