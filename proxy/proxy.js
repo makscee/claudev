@@ -74,6 +74,12 @@ function handleMitm(clientSocket, head, host, port) {
     if (head.length > 0) tlsServer.unshift(head);
   });
 
+  // Single shared upstream pointer for this keep-alive TLS connection.
+  // Each forwarded request used to attach its own tlsClient.on('error')
+  // listener, which accumulated across requests on the same socket and
+  // eventually tripped Node's MaxListenersExceededWarning on TLSSocket.
+  let currentUpstream = null;
+
   // Buffer the full HTTP request from client
   let requestData = Buffer.alloc(0);
   let headersParsed = false;
@@ -140,7 +146,14 @@ function handleMitm(clientSocket, head, host, port) {
     }
   });
 
-  tlsServer.on('error', () => { clientSocket.destroy(); });
+  tlsServer.on('error', () => {
+    clientSocket.destroy();
+    if (currentUpstream) currentUpstream.destroy();
+  });
+
+  // Expose setter so forwardToUpstream can register the active upstream
+  // without attaching a fresh per-request error listener on tlsServer.
+  tlsServer._setCurrentUpstream = (u) => { currentUpstream = u; };
 }
 
 function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint, model) {
@@ -217,7 +230,19 @@ function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint
 
   upstream.on('end', () => tlsClient.end());
   upstream.on('error', () => { tlsClient.destroy(); });
-  tlsClient.on('error', () => { upstream.destroy(); });
+
+  // Register this upstream as the current one. The tlsClient (TLS socket)
+  // already has a single shared error handler installed in handleMitm that
+  // destroys whatever upstream is current. Avoids per-request listener
+  // accumulation on the keep-alive socket.
+  if (typeof tlsClient._setCurrentUpstream === 'function') {
+    tlsClient._setCurrentUpstream(upstream);
+    upstream.on('close', () => {
+      if (typeof tlsClient._setCurrentUpstream === 'function') {
+        tlsClient._setCurrentUpstream(null);
+      }
+    });
+  }
 }
 
 function writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens) {
