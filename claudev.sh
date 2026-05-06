@@ -260,12 +260,36 @@ install_claude() {
   return 0
 }
 
+# Merge two onboarding keys into ~/.claude.json. Portable ladder, since each
+# tier fails on some target:
+#   1. jq    — preferred; absent on stock Win Git Bash + many minimal Linux.
+#   2. python3 — sanity-probed first; on Win the bare name is an MS-Store
+#      launcher shim that exits nonzero with "Python was not found".
+#   3. POSIX shell — flat-object sed/awk fallback; never fails on the small
+#      JSON claudev cares about. Keeps install green even with no jq + no py.
+# Per "MUST NOT fail install" contract: on total failure we still return 0
+# after a warning (caller already swallows non-zero, but be explicit).
 skip_claude_onboarding() {
   cv=$(claude --version 2>/dev/null | awk '{print $1}')
   [ -z "$cv" ] && cv="2.0.0"
   cfg="${HOME}/.claude.json"
-  if command -v python3 >/dev/null 2>&1; then
-    CLAUDEV_CFG="$cfg" CLAUDEV_VER="$cv" python3 -c '
+
+  # Tier 1: jq (probe binary AND working install)
+  if command -v jq >/dev/null 2>&1 && echo '{}' | jq -e . >/dev/null 2>&1; then
+    tmp="$cfg.tmp.$$"
+    if [ -f "$cfg" ]; then
+      jq --arg v "$cv" '. + {hasCompletedOnboarding: true, lastOnboardingVersion: $v}' \
+        "$cfg" > "$tmp" 2>/dev/null && mv -f "$tmp" "$cfg" && return 0
+    else
+      jq -n --arg v "$cv" '{hasCompletedOnboarding: true, lastOnboardingVersion: $v}' \
+        > "$tmp" 2>/dev/null && mv -f "$tmp" "$cfg" && return 0
+    fi
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+
+  # Tier 2: python3 (sanity-probe to dodge Windows MS-Store launcher shim)
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+    if CLAUDEV_CFG="$cfg" CLAUDEV_VER="$cv" python3 -c '
 import json, os
 p = os.environ["CLAUDEV_CFG"]
 v = os.environ["CLAUDEV_VER"]
@@ -278,11 +302,89 @@ d["lastOnboardingVersion"] = v
 tmp = p + ".tmp." + str(os.getpid())
 with open(tmp, "w") as f: json.dump(d, f, indent=2)
 os.replace(tmp, p)
-' || return 1
-  elif [ ! -f "$cfg" ]; then
-    printf '{\n  "hasCompletedOnboarding": true,\n  "lastOnboardingVersion": "%s"\n}\n' "$cv" > "$cfg" || return 1
+' 2>/dev/null; then
+      return 0
+    fi
   fi
+
+  # Tier 3: POSIX shell. Assumes flat top-level object (claudev's case).
+  # Reads existing file, replaces or appends the two keys, writes atomically.
+  _scc_pure_merge "$cfg" "$cv" && return 0
+
+  printf "warning: skip_claude_onboarding: no jq / python3 / shell merge worked\n" >&2
   return 0
+}
+
+# _scc_pure_merge CFG VERSION — flat-object key set/append in pure POSIX shell.
+# Strategy: load text (or default {}). For each key, if key exists replace its
+# value via sed; else inject `"key": value,` after the opening `{`. Final write
+# is atomic via mv. LF line endings only.
+_scc_pure_merge() {
+  _scc_cfg="$1"
+  _scc_ver="$2"
+  if [ -f "$_scc_cfg" ]; then
+    _scc_text=$(cat "$_scc_cfg") || return 1
+  else
+    _scc_text='{}'
+  fi
+  # Strip any CRLF for predictable sed behaviour.
+  _scc_text=$(printf '%s' "$_scc_text" | tr -d '\r')
+  # Ensure non-empty + has braces; on malformed input start from empty object.
+  case "$_scc_text" in
+    *'{'*'}'*) ;;
+    *) _scc_text='{}' ;;
+  esac
+  _scc_text=$(_scc_set_key "$_scc_text" hasCompletedOnboarding 'true' raw) || return 1
+  _scc_text=$(_scc_set_key "$_scc_text" lastOnboardingVersion "$_scc_ver" string) || return 1
+  _scc_tmp="$_scc_cfg.tmp.$$"
+  printf '%s\n' "$_scc_text" > "$_scc_tmp" || { rm -f "$_scc_tmp"; return 1; }
+  mv -f "$_scc_tmp" "$_scc_cfg" || { rm -f "$_scc_tmp"; return 1; }
+  return 0
+}
+
+# _scc_set_key TEXT KEY VALUE MODE — emit TEXT with "KEY": VALUE set.
+# MODE = "string" (quote+escape value) or "raw" (literal, e.g. true/false/number).
+_scc_set_key() {
+  _sk_text="$1"; _sk_key="$2"; _sk_val="$3"; _sk_mode="$4"
+  if [ "$_sk_mode" = string ]; then
+    # Escape backslashes and double-quotes in the value.
+    _sk_esc=$(printf '%s' "$_sk_val" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    _sk_render="\"$_sk_key\": \"$_sk_esc\""
+  else
+    _sk_render="\"$_sk_key\": $_sk_val"
+  fi
+  # If key already present, replace its value via awk (handles string OR raw).
+  if printf '%s' "$_sk_text" | grep -q "\"$_sk_key\"[[:space:]]*:"; then
+    printf '%s' "$_sk_text" | awk -v k="$_sk_key" -v r="$_sk_render" '
+      {
+        # Replace "KEY"<ws>:<ws><value-up-to-, or }> with rendered pair.
+        # Value can be "..." (string), true|false|null, or a number. Stop at
+        # comma or closing brace. Greedy enough for flat objects.
+        pat = "\"" k "\"[[:space:]]*:[[:space:]]*(\"([^\"\\\\]|\\\\.)*\"|true|false|null|-?[0-9]+(\\.[0-9]+)?)"
+        gsub(pat, r)
+        print
+      }
+    '
+    return 0
+  fi
+  # Key absent: inject after the opening `{`. Empty object `{}` → `{ render }`.
+  printf '%s' "$_sk_text" | awk -v r="$_sk_render" '
+    BEGIN { done = 0 }
+    {
+      if (!done) {
+        if (match($0, /\{[[:space:]]*\}/)) {
+          # Empty object on this line.
+          sub(/\{[[:space:]]*\}/, "{" r "}")
+          done = 1
+        } else if (match($0, /\{/)) {
+          # Non-empty: insert `render,` right after `{`.
+          sub(/\{/, "{" r ", ")
+          done = 1
+        }
+      }
+      print
+    }
+  '
 }
 
 ensure_claude() {
