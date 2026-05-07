@@ -29,7 +29,7 @@ if [ -n "$_cdv_self_dir" ]; then
 fi
 unset _cdv_self_dir _cdv_self_base _cdv_self_path 2>/dev/null || true
 
-CLAUDEV_VERSION="0.2.14"
+CLAUDEV_VERSION="0.2.15"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -387,8 +387,64 @@ _scc_set_key() {
   '
 }
 
+# _recover_claude_msys — Windows-only recovery for the half-trampoline state
+# claude-code's own self-update can leave bin/claude.exe missing while
+# parking the prior binary as bin/claude.exe.old.<epoch-ms>. command -v still
+# finds the npm shim, so have_claude returns true, but exec fails because the
+# shim's target is gone. We restore the newest .old.<ts> over claude.exe and
+# probe `claude --version`. On non-MSYS this is a no-op (returns 0).
+#
+# Returns 0 if claude is runnable (after recovery or no-op).
+# Returns 1 if Windows + claude still not runnable after probe — caller should
+# emit the locale-keyed fatal hint and exit.
+_recover_claude_msys() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) return 0 ;;
+  esac
+
+  _rcm_npm_root=$(npm root -g 2>/dev/null) || _rcm_npm_root=""
+  if [ -n "$_rcm_npm_root" ]; then
+    _rcm_bin="$_rcm_npm_root/@anthropic-ai/claude-code/bin"
+    if [ -d "$_rcm_bin" ] && [ ! -e "$_rcm_bin/claude.exe" ]; then
+      # Pick newest .old.<epoch-ms>. Suffix is an epoch-ms timestamp, so a
+      # numeric sort on the suffix gives the newest. POSIX sh has no `[[`,
+      # so we delegate sort+pick to ls + awk (no lex `\>` per SC3012).
+      _rcm_newest=$(
+        for _rcm_cand in "$_rcm_bin"/claude.exe.old.*; do
+          [ -e "$_rcm_cand" ] || continue
+          # Print "<suffix> <full-path>"; suffix is everything after .old.
+          _rcm_sfx=${_rcm_cand##*.old.}
+          printf '%s\t%s\n' "$_rcm_sfx" "$_rcm_cand"
+        done | sort -nr -k1,1 | awk 'NR==1 { sub(/^[^\t]*\t/, ""); print; exit }'
+      )
+      if [ -n "$_rcm_newest" ]; then
+        if mv -f "$_rcm_newest" "$_rcm_bin/claude.exe" 2>/dev/null; then
+          # shellcheck disable=SC2059
+          printf "${L_CLAUDE_BROKEN_RECOVERED}\n" "$(basename "$_rcm_newest")" >&2
+        fi
+      fi
+    fi
+  fi
+
+  # Probe with short timeout. `timeout` may not exist on every Git Bash; if absent, skip probe.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5 claude --version >/dev/null 2>&1 || return 1
+  else
+    claude --version >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
 ensure_claude() {
   if have_claude; then
+    # Windows-only: recover from claude-code self-update half-rename state
+    # before onboarding-skip touches the (potentially missing) binary.
+    if ! _recover_claude_msys; then
+      # shellcheck disable=SC2059
+      printf "${L_CLAUDE_BROKEN_FATAL}\n" >&2
+      return 1
+    fi
     # Always silence onboarding — friend may have installed claude separately
     # and never completed (or skipped) its first-run wizard.
     skip_claude_onboarding

@@ -20,3 +20,5 @@ L_TOO_MANY_ATTEMPTS="слишком много неверных попыток; 
 L_NETWORK_ERROR="ошибка сети при обращении к %s; выход"
 L_SERVER_ERROR="ошибка сервера (HTTP %s) от %s"
 L_WELCOME="Добро пожаловать, %s"
+L_CLAUDE_BROKEN_RECOVERED="claude.exe отсутствует — восстановлен из %s"
+L_CLAUDE_BROKEN_FATAL="claude не запускается. Переустановите:\n  npm install -g --include=optional --force @anthropic-ai/claude-code"
