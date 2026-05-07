@@ -29,7 +29,7 @@ if [ -n "$_cdv_self_dir" ]; then
 fi
 unset _cdv_self_dir _cdv_self_base _cdv_self_path 2>/dev/null || true
 
-CLAUDEV_VERSION="0.2.13"
+CLAUDEV_VERSION="0.2.14"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -722,6 +722,29 @@ self_update() {
   exec "$0" "$@"
 }
 
+# Launch `claude` with the fetched OAuth token. OS-dispatched: MSYS Git Bash
+# strips the controlling TTY from a backgrounded child node.exe, hanging
+# Claude Code's Ink TUI on initial render. On Windows we run claude in the
+# foreground (the EXIT trap set by the caller still runs stop_proxy). On
+# POSIX we keep the background+wait pattern so SIGINT/SIGTERM can forward
+# to claude AND trigger graceful proxy cleanup.
+run_claude_session() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@"
+      return $?
+      ;;
+  esac
+  env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@" &
+  CLAUDE_PID=$!
+  trap 'kill -s INT "$CLAUDE_PID" 2>/dev/null; stop_proxy' INT
+  trap 'kill -s TERM "$CLAUDE_PID" 2>/dev/null; stop_proxy' TERM
+  wait "$CLAUDE_PID" 2>/dev/null
+  CLAUDE_RC=$?
+  CLAUDE_PID=""
+  return "$CLAUDE_RC"
+}
+
 # --- selftest hooks (used by bats; not user-facing) ---
 
 case "${1:-}" in
@@ -781,6 +804,12 @@ case "${1:-}" in
       printf "%s\n" "$KEY"
     fi
     exit "$rc"
+    ;;
+  --selftest-run-claude-session)
+    shift
+    KEY="selftest-key"
+    run_claude_session "$@"
+    exit $?
     ;;
 esac
 
@@ -908,16 +937,8 @@ main() {
 
   trap stop_proxy EXIT
 
-  env CLAUDE_CODE_OAUTH_TOKEN="$KEY" claude "$@" &
-  CLAUDE_PID=$!
-
-  trap 'kill -s INT "$CLAUDE_PID" 2>/dev/null; stop_proxy' INT
-  trap 'kill -s TERM "$CLAUDE_PID" 2>/dev/null; stop_proxy' TERM
-
-  wait "$CLAUDE_PID" 2>/dev/null
-  CLAUDE_RC=$?
-  CLAUDE_PID=""
-  exit "$CLAUDE_RC"
+  run_claude_session "$@"
+  exit $?
 }
 
 dispatch "$@"
