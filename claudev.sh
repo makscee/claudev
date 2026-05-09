@@ -574,10 +574,10 @@ print_access_status() {
         return 0
     }
 
-    grant_section=$(printf '%s' "$body" | awk '/"claudevGrant"/{found=1} found{print}' | head -c 400)
+    grant_section=$(printf '%s' "$body" | sed 's/.*"claudevGrant"://' | head -c 400)
 
     case "$grant_section" in
-        *'"claudevGrant":null'*)
+        'null'*|'null')
             printf "%s\n" "$L_ACCESS_NO_GRANT"
             return 0
             ;;
@@ -919,6 +919,11 @@ case "${1:-}" in
     shift
     KEY="selftest-key"
     run_claude_session "$@"
+    exit $?
+    ;;
+  --selftest-print-access-status)
+    load_locale
+    print_access_status
     exit $?
     ;;
 esac
