@@ -562,6 +562,60 @@ print_welcome() {
   printf "${fmt}\n" "$uname"
 }
 
+# --- access status ---
+
+print_access_status() {
+    token=$(cat "$HOME/.claudev/token" 2>/dev/null || true)
+    [ -z "$token" ] && return 0
+    body=$(curl -fsS -m 5 -H 'content-type: application/json' \
+        -d "{\"token\":\"$token\"}" \
+        "$CLAUDEV_AUTH_HOST/v1/auth/verify" 2>/dev/null) || {
+        printf "%s\n" "$L_ACCESS_UNAVAILABLE"
+        return 0
+    }
+
+    grant_section=$(printf '%s' "$body" | awk '/"claudevGrant"/{found=1} found{print}' | head -c 400)
+
+    case "$grant_section" in
+        *'"claudevGrant":null'*)
+            printf "%s\n" "$L_ACCESS_NO_GRANT"
+            return 0
+            ;;
+        *'"unlimited":true'*)
+            printf "%s\n" "$L_ACCESS_UNLIMITED"
+            return 0
+            ;;
+        *'"expired":true'*)
+            expires=$(printf '%s' "$grant_section" | awk -F'[:,]' '/"expiresAt":/{print $2; exit}' | tr -d ' ')
+            now=$(date +%s)
+            days=$(( (now - expires) / 86400 ))
+            # shellcheck disable=SC2059
+            printf "$L_ACCESS_EXPIRED\n" "$days"
+            return 0
+            ;;
+        *'"expiresAt":'*)
+            expires=$(printf '%s' "$grant_section" | awk -F'[:,]' '/"expiresAt":/{print $2; exit}' | tr -d ' ')
+            now=$(date +%s)
+            secs=$(( expires - now ))
+            iso=$(date -u -r "$expires" +%Y-%m-%d 2>/dev/null || date -u -d "@$expires" +%Y-%m-%d 2>/dev/null || echo "")
+            if [ "$secs" -ge 86400 ]; then
+                days=$(( secs / 86400 ))
+                # shellcheck disable=SC2059
+                printf "$L_ACCESS_DAYS_LEFT\n" "$days" "$iso"
+            else
+                hours=$(( secs / 3600 ))
+                # shellcheck disable=SC2059
+                printf "$L_ACCESS_HOURS_LEFT\n" "$hours" "$iso"
+            fi
+            return 0
+            ;;
+        *)
+            printf "%s\n" "$L_ACCESS_UNAVAILABLE"
+            return 0
+            ;;
+    esac
+}
+
 # --- pool key fetch ---
 
 # extract_json_string KEY — reads json on stdin, prints first string-typed
@@ -989,6 +1043,7 @@ main() {
   fi
   [ "$rc" = 0 ] || exit "$rc"
   sweep_orphan_jsonl
+  print_access_status
   start_proxy
 
   trap stop_proxy EXIT
