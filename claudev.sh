@@ -29,7 +29,7 @@ if [ -n "$_cdv_self_dir" ]; then
 fi
 unset _cdv_self_dir _cdv_self_base _cdv_self_path 2>/dev/null || true
 
-CLAUDEV_VERSION="0.2.15"
+CLAUDEV_VERSION="0.2.16"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -954,10 +954,20 @@ find_proxy_dir() {
 
 start_proxy() {
   [ "${CLAUDEV_NO_PROXY:-}" = 1 ] && return 0
-  command -v node >/dev/null 2>&1 || return 0
-  find_proxy_dir || return 0
+  if ! command -v node >/dev/null 2>&1; then
+    printf "claudev: node not found on PATH — proxy disabled, usage tracking off\n" >&2
+    return 0
+  fi
+  if ! find_proxy_dir; then
+    printf "claudev: proxy bundle not found (looked in %s, %s, %s) — usage tracking off\n" \
+      "$SCRIPT_DIR/proxy" "$CLAUDEV_HOME/proxy" "${HOME}/.local/lib/claudev/proxy" >&2
+    return 0
+  fi
 
-  node "$CLAUDEV_PROXY_DIR/gen-ca.js" || return 0
+  if ! node "$CLAUDEV_PROXY_DIR/gen-ca.js" 2>&1; then
+    printf "claudev: gen-ca.js failed — proxy disabled, usage tracking off\n" >&2
+    return 0
+  fi
 
   proxy_ready=$(mktemp)
   rm -f "$proxy_ready"
@@ -984,6 +994,7 @@ start_proxy() {
   done
 
   if [ ! -f "$proxy_ready" ]; then
+    printf "claudev: proxy did not become ready within 5s — disabled, usage tracking off\n" >&2
     kill "$PROXY_PID" 2>/dev/null || true
     PROXY_PID=""
     rm -f "$proxy_ready"

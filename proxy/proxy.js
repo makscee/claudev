@@ -88,8 +88,9 @@ function handleMitm(clientSocket, head, host, port) {
   let headerEnd = -1;
   let tokenFingerprint = '';
   let model = '';
+  let isUpgrade = false;
 
-  tlsServer.on('data', (chunk) => {
+  const onData = (chunk) => {
     requestData = Buffer.concat([requestData, chunk]);
 
     if (!headersParsed) {
@@ -117,6 +118,9 @@ function handleMitm(clientSocket, head, host, port) {
         if (lower.startsWith('content-length:')) {
           contentLength = parseInt(line.slice('content-length:'.length).trim(), 10);
         }
+        if (lower.startsWith('upgrade:')) {
+          isUpgrade = true;
+        }
       }
 
       tlsServer._requestPath = requestPath;
@@ -128,24 +132,42 @@ function handleMitm(clientSocket, head, host, port) {
       const bodyReceived = requestData.length - bodyStart;
 
       if (bodyReceived >= contentLength) {
-        // Extract model from body
-        const body = requestData.slice(bodyStart, bodyStart + contentLength).toString();
-        try {
-          const parsed = JSON.parse(body);
-          model = parsed.model || '';
-        } catch (e) {
-          // Try regex fallback
-          const m = body.match(/"model"\s*:\s*"([^"]+)"/);
-          if (m) model = m[1];
+        // Extract model from body (skipped for Upgrade — no body)
+        if (!isUpgrade) {
+          const body = requestData.slice(bodyStart, bodyStart + contentLength).toString();
+          try {
+            const parsed = JSON.parse(body);
+            model = parsed.model || '';
+          } catch (e) {
+            // Try regex fallback
+            const m = body.match(/"model"\s*:\s*"([^"]+)"/);
+            if (m) model = m[1];
+          }
         }
 
         // Forward to upstream
-        forwardToUpstream(tlsServer, requestData, tlsServer._requestPath, tokenFingerprint, model);
+        forwardToUpstream(tlsServer, requestData, tlsServer._requestPath, tokenFingerprint, model, isUpgrade);
+
+        if (isUpgrade) {
+          // HTTP/1.1 Upgrade (WebSocket — voice mode). After the request is
+          // forwarded the connection is no longer request/response: client
+          // sends raw frames. Detach the HTTP parser and pipe bytes straight
+          // through for the rest of this TLS socket's lifetime.
+          tlsServer.removeListener('data', onData);
+          tlsServer.on('data', (c) => {
+            if (currentUpstream && !currentUpstream.destroyed) currentUpstream.write(c);
+          });
+          return;
+        }
+
         requestData = Buffer.alloc(0);
         headersParsed = false;
+        contentLength = 0;
       }
     }
-  });
+  };
+
+  tlsServer.on('data', onData);
 
   tlsServer.on('error', () => {
     clientSocket.destroy();
@@ -157,7 +179,7 @@ function handleMitm(clientSocket, head, host, port) {
   tlsServer._setCurrentUpstream = (u) => { currentUpstream = u; };
 }
 
-function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint, model) {
+function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint, model, isUpgrade) {
   const upstream = tls.connect({
     host: TARGET_HOST,
     port: TARGET_PORT,
@@ -173,7 +195,7 @@ function forwardToUpstream(tlsClient, requestData, requestPath, tokenFingerprint
     }
   });
 
-  const isMessagesEndpoint = /\/(v1\/messages|api\/chat|api\/claude_code\/chat|messages)/.test(requestPath);
+  const isMessagesEndpoint = !isUpgrade && /\/(v1\/messages|api\/chat|api\/claude_code\/chat|messages)/.test(requestPath);
   let headersDone = false;
   let responseBuf = '';
   let sseLineBuf = '';
