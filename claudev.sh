@@ -29,7 +29,7 @@ if [ -n "$_cdv_self_dir" ]; then
 fi
 unset _cdv_self_dir _cdv_self_base _cdv_self_path 2>/dev/null || true
 
-CLAUDEV_VERSION="0.2.16"
+CLAUDEV_VERSION="0.2.17"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
