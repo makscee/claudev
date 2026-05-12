@@ -29,7 +29,7 @@ if [ -n "$_cdv_self_dir" ]; then
 fi
 unset _cdv_self_dir _cdv_self_base _cdv_self_path 2>/dev/null || true
 
-CLAUDEV_VERSION="0.2.17"
+CLAUDEV_VERSION="0.2.18"
 CLAUDEV_AUTH_HOST="${CLAUDEV_AUTH_HOST:-https://auth.makscee.ru}"
 CLAUDEV_KEYS_HOST="${CLAUDEV_KEYS_HOST:-https://keys.makscee.ru}"
 CLAUDEV_HOME="${HOME}/.claudev"
@@ -534,7 +534,8 @@ cmd_login() {
 # --- /v1/auth/me + welcome ---
 
 fetch_me() {
-  # Best-effort: GET /v1/auth/me, cache username (email local-part) in config.
+  # Best-effort: GET /v1/auth/me, cache username in config.
+  # Preference: displayName > telegramUsername > email local-part.
   # Sets caller-visible USERNAME on success; silent on any failure.
   USERNAME=""
   if [ -z "${TOKEN:-}" ]; then
@@ -543,9 +544,22 @@ fetch_me() {
   [ -n "${TOKEN:-}" ] || return 0
   me_resp=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
     "$CLAUDEV_AUTH_HOST/v1/auth/me" 2>/dev/null) || return 0
+  dn=$(printf "%s" "$me_resp" | extract_json_string displayName)
+  tg=$(printf "%s" "$me_resp" | extract_json_string telegramUsername)
   email=$(printf "%s" "$me_resp" | extract_json_string email)
-  [ -n "$email" ] || return 0
-  USERNAME="${email%@*}"
+  # extract_json_string returns the literal string "null" for JSON null values;
+  # treat that as absence.
+  [ "$dn" = "null" ] && dn=""
+  [ "$tg" = "null" ] && tg=""
+  [ "$email" = "null" ] && email=""
+  if [ -n "$dn" ]; then
+    USERNAME="$dn"
+  elif [ -n "$tg" ]; then
+    USERNAME="$tg"
+  elif [ -n "$email" ]; then
+    USERNAME="${email%@*}"
+  fi
+  [ -n "$USERNAME" ] || return 0
   config_set username "$USERNAME"
 }
 
@@ -646,6 +660,13 @@ fetch_key() {
       rm -f "$CLAUDEV_TOKEN" "$resp_file"
       printf "%s\n" "$L_SESSION_REVOKED" >&2
       return 10  # signal to caller: re-prompt token + retry
+      ;;
+    403)
+      rm -f "$resp_file"
+      # Grant expired/revoked/missing. Reuse print_access_status which parses
+      # /v1/auth/verify's claudevGrant block and emits the exact reason.
+      print_access_status >&2
+      exit 3
       ;;
     503)
       rm -f "$resp_file"
