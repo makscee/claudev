@@ -66,6 +66,14 @@ State files in `~/.claudev/`: `token` (mode 0600), `config` (locale + last updat
 
 Anything else passes through to `claude` verbatim. So `claudev --print "hi"` runs `claude --print "hi"`.
 
+### Forwarded flags
+
+Any flag claudev does not consume is passed through to the underlying `claude`
+binary unchanged. In particular:
+
+- `--mcp-config <path>` — load MCP server definitions from `<path>`. Required
+  to talk to a local void-os daemon MCP server.
+
 ## Status
 
 v1 — POSIX-sh, mac/linux + Windows (Git Bash). WSL also works.
