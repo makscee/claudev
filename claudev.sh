@@ -1064,6 +1064,14 @@ sweep_orphan_jsonl() {
 # --- main pipeline ---
 
 main() {
+  # CLAUDEV_OFFLINE=1: short-circuit straight to claude with the caller's argv.
+  # Used by tests (e.g. test/offline-guard.bats, mcp-config-passthrough)
+  # to prove flag forwarding without hitting void-auth / void-keys /
+  # Anthropic. Skips self_update, ensure_claude, ensure_token, fetch_key,
+  # and start_proxy. Caller must provide a working `claude` on PATH.
+  if [ -n "${CLAUDEV_OFFLINE:-}" ]; then
+    exec claude "$@"
+  fi
   load_locale
   print_header
   self_update      # may exec self and never return

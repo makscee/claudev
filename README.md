@@ -50,6 +50,12 @@ Hosts are overridable via env vars (defaults shown):
 
 State files in `~/.claudev/`: `token` (mode 0600), `config` (locale + last update check).
 
+### Environment variables
+
+- `CLAUDEV_OFFLINE=1` — skip self-update, locale fetch, token refresh, key
+  fetch, and proxy spawn; `exec` the `claude` on `PATH` directly with the
+  caller's argv. Used by tests; do not set in production.
+
 ## Subcommands
 
 - `claudev`            — launch claude (logs in if needed)
