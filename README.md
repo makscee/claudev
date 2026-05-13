@@ -50,6 +50,12 @@ Hosts are overridable via env vars (defaults shown):
 
 State files in `~/.claudev/`: `token` (mode 0600), `config` (locale + last update check).
 
+### Environment variables
+
+- `CLAUDEV_OFFLINE=1` — skip self-update, locale fetch, token refresh, key
+  fetch, and proxy spawn; `exec` the `claude` on `PATH` directly with the
+  caller's argv. Used by tests; do not set in production.
+
 ## Subcommands
 
 - `claudev`            — launch claude (logs in if needed)
@@ -59,6 +65,14 @@ State files in `~/.claudev/`: `token` (mode 0600), `config` (locale + last updat
 - `claudev --help`     — usage
 
 Anything else passes through to `claude` verbatim. So `claudev --print "hi"` runs `claude --print "hi"`.
+
+### Forwarded flags
+
+Any flag claudev does not consume is passed through to the underlying `claude`
+binary unchanged. In particular:
+
+- `--mcp-config <path>` — load MCP server definitions from `<path>`. Required
+  to talk to a local void-os daemon MCP server.
 
 ## Status
 
