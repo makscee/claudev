@@ -16,6 +16,16 @@ const TARGET_PORT = parseInt(process.env.CLAUDEV_PROXY_TARGET_PORT || '443', 10)
 const SESSION_ID = process.env.CLAUDEV_SESSION_ID || String(process.ppid);
 const INTERCEPT_HOST = 'api.anthropic.com';
 
+// Revoke-poll: every CLAUDEV_REVOKE_POLL_SEC (default 60), POST the session
+// bearer to CLAUDEV_AUTH_VERIFY_URL. If the response says claudevEnabled=false
+// or status is 401, mark the proxy revoked: destroy live sockets and reject
+// future CONNECTs with 401. No-op if either env var is unset (legacy mode).
+const REVOKE_POLL_SEC = parseInt(process.env.CLAUDEV_REVOKE_POLL_SEC || '60', 10);
+const SESSION_TOKEN = process.env.CLAUDEV_SESSION_TOKEN || '';
+const AUTH_VERIFY_URL = process.env.CLAUDEV_AUTH_VERIFY_URL || '';
+let revoked = false;
+const liveSockets = new Set();
+
 const readyFile = process.argv[2];
 if (!readyFile) {
   console.error('Usage: proxy.js <ready-file>');
@@ -40,8 +50,15 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('connect', (req, clientSocket, head) => {
+  if (revoked) {
+    clientSocket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    clientSocket.destroy();
+    return;
+  }
   const [host, portStr] = req.url.split(':');
   const port = parseInt(portStr || '443', 10);
+  liveSockets.add(clientSocket);
+  clientSocket.on('close', () => liveSockets.delete(clientSocket));
   if (host === INTERCEPT_HOST) {
     handleMitm(clientSocket, head, host, port);
   } else {
@@ -284,10 +301,80 @@ function writeUsage(tokenFingerprint, model, inputTokens, outputTokens, cacheCre
   shipOne(event).catch((e) => process.stderr.write(`ship-usage: shipOne failed: ${e.message}\n`));
 }
 
+function logRevoke(msg) {
+  try {
+    appendFileSync(
+      join(homedir(), '.claudev', 'proxy.log'),
+      `[revoke-poll ${new Date().toISOString()}] ${msg}\n`,
+    );
+  } catch {}
+}
+
+function markRevoked(reason) {
+  if (revoked) return;
+  revoked = true;
+  logRevoke(`marking proxy revoked: ${reason}; killing ${liveSockets.size} live socket(s)`);
+  process.stderr.write(`claudev: session revoked (${reason}) — closing claude\n`);
+  for (const s of liveSockets) {
+    try { s.destroy(); } catch {}
+  }
+  liveSockets.clear();
+}
+
+function pollRevoke() {
+  if (revoked) return;
+  if (!SESSION_TOKEN || !AUTH_VERIFY_URL) return;
+  let parsed;
+  try { parsed = new URL(AUTH_VERIFY_URL); } catch (e) {
+    logRevoke(`invalid CLAUDEV_AUTH_VERIFY_URL=${AUTH_VERIFY_URL}: ${e.message}`);
+    return;
+  }
+  const lib = parsed.protocol === 'http:' ? require('http') : require('https');
+  const body = JSON.stringify({ token: SESSION_TOKEN });
+  const req = lib.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+      timeout: 10_000,
+    },
+    (res) => {
+      let chunks = '';
+      res.on('data', (c) => { chunks += c.toString(); });
+      res.on('end', () => {
+        if (res.statusCode === 401) { markRevoked('verify returned 401'); return; }
+        if (res.statusCode !== 200) {
+          logRevoke(`verify non-200/401: ${res.statusCode} — treating as transient`);
+          return;
+        }
+        try {
+          const data = JSON.parse(chunks);
+          if (!data.claudevEnabled) { markRevoked('claudevEnabled=false'); return; }
+        } catch (e) {
+          logRevoke(`verify json parse failed: ${e.message}`);
+        }
+      });
+    },
+  );
+  req.on('error', (e) => logRevoke(`verify request error: ${e.message}`));
+  req.on('timeout', () => { req.destroy(new Error('timeout')); });
+  req.write(body);
+  req.end();
+}
+
 server.listen(0, '127.0.0.1', () => {
   const port = server.address().port;
   writeFileSync(readyFile, String(port));
   console.log(`claudev-proxy listening on 127.0.0.1:${port}`);
+  if (SESSION_TOKEN && AUTH_VERIFY_URL) {
+    logRevoke(`enabled: poll=${REVOKE_POLL_SEC}s url=${AUTH_VERIFY_URL}`);
+    pollRevoke();
+    setInterval(pollRevoke, REVOKE_POLL_SEC * 1000).unref();
+  } else {
+    logRevoke(`disabled: CLAUDEV_SESSION_TOKEN+CLAUDEV_AUTH_VERIFY_URL not both set`);
+  }
 });
 
 function gracefulExit() {

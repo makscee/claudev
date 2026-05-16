@@ -993,7 +993,10 @@ start_proxy() {
   proxy_ready=$(mktemp)
   rm -f "$proxy_ready"
   { printf '\n=== proxy start pid=%s session=%s %s ===\n' "$$" "$$" "$(date '+%Y-%m-%d %H:%M:%S')" >>"$CLAUDEV_HOME/proxy.log"; } 2>/dev/null || true
-  CLAUDEV_SESSION_ID=$$ node "$CLAUDEV_PROXY_DIR/proxy.js" "$proxy_ready" 2>>"$CLAUDEV_HOME/proxy.log" &
+  CLAUDEV_SESSION_ID=$$ \
+    CLAUDEV_SESSION_TOKEN="$TOKEN" \
+    CLAUDEV_AUTH_VERIFY_URL="$CLAUDEV_AUTH_HOST/v1/auth/verify" \
+    node "$CLAUDEV_PROXY_DIR/proxy.js" "$proxy_ready" 2>>"$CLAUDEV_HOME/proxy.log" &
   PROXY_PID=$!
 
   # Periodic shipper: every SHIP_INTERVAL seconds (default 900), ship pending usage
